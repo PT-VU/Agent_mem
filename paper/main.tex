@@ -31,7 +31,7 @@
 \begin{abstract}
 Large language model agents for automated code repair typically execute each attempt in isolation, discarding knowledge accumulated through prior failures and successes. We present \textbf{Agent-mem}, a training-free cross-attempt experience memory framework that intercepts agent events through a non-invasive hook interface, stores semantically typed memory cards, and injects retrieved guidance into later attempts. Agent-mem records verified patch diffs, code anchors, and failure-side anti-patterns; governs card promotion using official evaluation outcomes; and applies configurable reuse, gating, and feedback modules.
 
-We evaluate Agent-mem on SWE-bench Full using Kimi (\texttt{kimi-latest}) in a controlled comparison across nine diagnostic instances, with ten attempts per condition (180 attempts total). A Watchdog timer excludes memory-server overhead from the agent's effective time budget. Aggregate resolution changes only slightly (68.9\% to 70.0\%), but per-instance results reveal heterogeneous behavior. In the two intermediate-difficulty instances, memory is associated with a $+$20 percentage point resolution increase and a 44.8\% reduction in input tokens. In zero-resolution instances, one case improves from 0/10 to 6/10 while another remains unresolved. In ceiling cases, memory can introduce interference. A targeted multi-agent auxiliary study further improves \texttt{resolved@10} from 75\% to 100\% on a four-instance aligned subset, while exposing limits of pre-submit critics. We treat these findings as diagnostic evidence and motivate conditional memory activation rather than unconditional deployment.
+We evaluate Agent-mem on SWE-bench Full using Kimi (\texttt{kimi-latest}) in a controlled comparison across nine diagnostic instances, with ten attempts per condition (180 attempts total). A Watchdog timer excludes memory-server overhead from the agent's effective time budget. Aggregate resolution changes only slightly (68.9\% to 70.0\%), but per-instance results reveal heterogeneous behavior. In the two intermediate-difficulty instances, memory is associated with a $+$20 percentage point resolution increase and a 44.8\% reduction in input tokens. In zero-resolution instances, one case changes from 0/10 to 6/10 while another remains unresolved. In ceiling cases, memory can introduce interference. A targeted multi-agent auxiliary study shows a \texttt{resolved@10} change from 75\% to 100\% on a four-instance aligned subset, while exposing limits of pre-submit critics. We treat these findings as diagnostic evidence and motivate conditional memory activation rather than unconditional deployment.
 
 \keywords{LLM agents \and automated code repair \and cross-attempt memory \and SWE-bench \and multi-agent systems}
 \end{abstract}
@@ -42,7 +42,7 @@ We evaluate Agent-mem on SWE-bench Full using Kimi (\texttt{kimi-latest}) in a c
 
 The automated resolution of real-world software bugs has emerged as a challenging and practically significant benchmark for LLM-based agents. SWE-bench~\cite{jimenez2024swebench} formalizes this task by requiring agents to produce code patches that pass repository-level tests for real GitHub issues. Recent work has achieved remarkable progress: SWE-agent~\cite{yang2024sweagent} demonstrated that carefully designed Agent-Computer Interfaces (ACI) substantially improve agent performance; Agentless~\cite{xia2024agentless} showed that a simplified, hierarchical pipeline of localization followed by repair can be highly competitive; and modular architectures such as MASAI~\cite{arora2024masai} decompose the task into focused sub-problems to reduce context contamination.
 
-Despite these advances, a fundamental limitation persists across all existing approaches: \textbf{each attempt is treated as an episodic event with no persistent memory across runs}. When an agent fails to resolve a bug and is re-invoked---whether by a user, a pipeline, or an automated retry mechanism---it begins from scratch, with no knowledge of which repair strategies were already attempted and failed, which file locations were already verified, or which specific patch structures were empirically shown to be correct. This is not merely an efficiency problem; it is a reliability problem. Agents that repeat invalid actions, explore already-exhausted search directions, or reproduce known-bad patches are demonstrably wasting time budgets and failing to leverage the most informative signal available: their own prior experience with the exact same bug.
+Despite these advances, many repair pipelines still treat each attempt as an episodic event with no persistent memory across runs. When an agent fails to resolve a bug and is re-invoked---whether by a user, a pipeline, or an automated retry mechanism---it often begins from scratch, with no knowledge of which repair strategies were already attempted and failed, which file locations were already verified, or which specific patch structures were empirically shown to be correct. This is not merely an efficiency problem; it is a reliability problem. Agents that repeat invalid actions, explore already-exhausted search directions, or reproduce known-bad patches waste time budgets and fail to leverage an informative signal: their own prior experience with the same bug.
 
 Reflection and memory mechanisms have been studied in agent contexts. Reflexion~\cite{shinn2023reflexion} introduces verbal reinforcement learning by appending textual failure summaries to subsequent attempts. However, such approaches store experience as unstructured natural language, making it difficult to enforce correctness, ensure evidence-backing, or distinguish between soft guidance and hard constraints. Graph-augmented retrieval methods~\cite{han2024graphrag} improve access to structured relational information but do not specifically address the cross-attempt code repair scenario where the most valuable information is \emph{what happened on prior attempts at the same bug}.
 
@@ -55,7 +55,7 @@ The central empirical contribution of this paper is a controlled repeated-attemp
     \item \textbf{Agent-mem framework}: A working, non-invasive implementation of cross-attempt memory for SWE-agent, comprising structured card types, five functional modules, a hint injection mechanism, and a time-fairness mechanism (Watchdog).
     \item \textbf{Controlled repeated-attempt evaluation}: A time-fair SWE-bench Full evaluation with 180 attempts across 9 instances, comparing standard SWE-agent against a memory-augmented condition.
     \item \textbf{Exploratory zone-dependent pattern}: Evidence that memory benefits are heterogeneous: positive in the intermediate group, mixed in the zero-resolution group, and negative in the ceiling group, including token-efficiency and single-instance capability-unlock signals.
-    \item \textbf{Multi-agent boundary analysis}: A targeted auxiliary study of lightweight multi-agent scaffolding over Agent-mem, showing repeated-attempt coverage improvement on a small aligned subset while exposing limits of pre-submit critics and exploration-phase closure control.
+    \item \textbf{Multi-agent boundary analysis}: A targeted auxiliary study of lightweight multi-agent scaffolding over Agent-mem, showing a repeated-attempt coverage signal on a small aligned subset while exposing limits of pre-submit critics and exploration-phase closure control.
 \end{enumerate}
 
 %=====================================================
@@ -66,7 +66,7 @@ The central empirical contribution of this paper is a controlled repeated-attemp
 
 SWE-bench~\cite{jimenez2024swebench} established a rigorous benchmark for evaluating automated code repair on real GitHub issues, grounding evaluation in executable test correctness. SWE-agent~\cite{yang2024sweagent} introduced the Agent-Computer Interface (ACI) design principle---structured file editing tools, repository navigation, and command execution---and demonstrated that interface design substantially outweighs prompt-level adjustments. Agentless~\cite{xia2024agentless} proposed a two-phase pipeline of hierarchical localization followed by repair without persistent agent state, achieving competitive performance at significantly lower cost.
 
-Modular approaches have further improved performance by decomposing the task. MASAI~\cite{arora2024masai} partitions software engineering into sub-problems handled by specialized agents, avoiding long trajectories that contaminate context and degrade generation quality. MarsCode~\cite{zan2024marscode} combines code knowledge graphs with a multi-agent pipeline for planning, reproduction, localization, and patching, achieving top performance on SWE-bench Lite.
+Modular approaches have further improved performance by decomposing the task. MASAI~\cite{arora2024masai} partitions software engineering into sub-problems handled by specialized agents, avoiding long trajectories that contaminate context and degrade generation quality. MarsCode Agent~\cite{zan2024marscode} applies a staged pipeline for planning, reproduction, localization, patch generation, and validation.
 
 A key limitation shared by all these approaches is the absence of cross-attempt persistence: each run discards all intermediate findings, and successive attempts are independent episodes. Agent-mem is designed to fill this gap.
 
@@ -86,7 +86,7 @@ Search-based agent methods such as Language Agent Tree Search (LATS)~\cite{zhou2
 
 \subsection{Iterative and Multi-Attempt Code Repair}
 
-RepairAgent~\cite{bouzenia2024repairagent} applies Thompson Sampling to select among repair strategies across many independent rollouts, learning a distribution over which strategies work for which bug categories. Unlike Agent-mem, RepairAgent does not persist structured memory; it maintains strategy selection statistics but not the verbatim patch content or failure-mode signatures needed for precise avoidance.
+RepairAgent~\cite{bouzenia2024repairagent} equips an LLM agent with repair tools, a dynamically updated prompt, and a finite-state machine that guides tool invocation. It autonomously interleaves information gathering, repair-ingredient search, and validation. Agent-mem instead focuses on persisting structured same-instance experience across repeated SWE-agent attempts.
 
 The multi-agent debate framework SWE-Debate~\cite{li2025swedebate} runs multiple agents in parallel and organizes structured debate rounds guided by code dependency graphs. This approach is complementary to Agent-mem: debate increases diversity within a single generation round, while Agent-mem accumulates knowledge across multiple attempt rounds. These two paradigms could be combined.
 
@@ -123,7 +123,7 @@ EvaluationFeedbackProcessor writes BugInvariantCard or BugAntiPatternCard \\
 $\downarrow$ \\
 GraphStore persists cards, confidence, anchors, and patch signatures \\
 $\downarrow$ \\
-Later attempts retrieve promoted cards and avoid suppressed patterns
+Later attempts retrieve ranked non-suppressed cards
 \end{tabular}
 \end{minipage}}%
 }
@@ -192,7 +192,7 @@ Memory hints are injected as a user-role message appended to the agent's convers
 Treat matching hints as high-priority guidance for this attempt.
 Avoid over-exploration: reuse validated repro/fix paths first, and
 once a minimal plausible patch exists, validate it before broadening.
-1. <hint text, up to 280 chars>
+1. <hint text>
 2. <hint text>
 ...
 \end{verbatim}
@@ -215,7 +215,7 @@ where $t_{\text{bridge},i}$ is the duration of the $i$-th memory server call, lo
 
 \subsection{Benchmark and Instance Selection}
 
-Experiments are conducted on \textbf{SWE-bench Full} (2,294 instances, \texttt{subset=full, split=test}), using the official evaluation harness (\texttt{swebench.harness.run\_evaluation}) with per-instance Docker containers. We use the full dataset rather than SWE-bench Lite (300 instances) or SWE-bench Verified (500 instances), because the Lite subset carries risks of overfitting from community exposure, and Verified preferentially selects human-confirmed-solvable instances that do not represent the natural difficulty distribution.
+Experiments are conducted on \textbf{SWE-bench Full} (2,294 instances, \texttt{subset=full, split=test}), using the official evaluation harness (\texttt{swebench.harness.run\_evaluation}) with per-instance Docker containers. We use the full dataset rather than the curated SWE-bench Lite (300 instances) or SWE-bench Verified (500 human-validated instances)~\cite{chowdhury2024swebenchverified}, because our diagnostic study aims to observe naturally occurring difficulty variation rather than evaluate only curated subsets.
 
 For the core controlled experiment (F3), we select nine diagnostic instances from three Python open-source projects, listed in Table~\ref{tab:instances}. This is not a random sample of SWE-bench Full. Instances were chosen to satisfy three criteria: (1) not previously used in framework development stages, to avoid memory pre-contamination; (2) spanning three distinct codebases, to test cross-project behavior; and (3) covering a range of estimated difficulties, to make heterogeneous memory effects observable under a limited API budget. The resulting analysis should therefore be interpreted as a controlled diagnostic study rather than a population-level estimate over all SWE-bench instances.
 
@@ -242,7 +242,7 @@ For the core controlled experiment (F3), we select nine diagnostic instances fro
 
 \subsection{Controlled Comparison Design}
 
-The F3 experiment follows a \textbf{paired controlled design}. For each of the 9 instances, we run two groups: (1) \textbf{nomem}: standard SWE-agent with no memory injection, every attempt independent; and (2) \textbf{with\_mem}: Agent-mem enabled with all five v2 modules active. Each group executes 10 independent attempts per instance, yielding $9 \times 10 \times 2 = 180$ total attempts.
+The F3 experiment follows a \textbf{controlled repeated-attempt design}. For each of the 9 instances, we run two groups: (1) \textbf{nomem}: standard SWE-agent with no memory injection, where each attempt starts without cross-attempt state; and (2) \textbf{with\_mem}: Agent-mem enabled with all five v2 modules active, where later attempts can retrieve experience from earlier outcomes. Each group executes a sequence of 10 attempts per instance, yielding $9 \times 10 \times 2 = 180$ total attempts.
 
 Both groups use identical model configuration, prompt template (\texttt{prompt\_base}), tool set, Docker environment, and SWE-bench partition. The Watchdog enforces a net agent time budget of 1,200 seconds for both groups. Concurrency is controlled by resource slot locks: a maximum of one heavy nomem slot and one heavy with\_mem slot run simultaneously, preventing resource contention.
 
@@ -267,7 +267,7 @@ Note that Module E's L3 force-submit is set to \texttt{dry\_run}, meaning that w
 
 \subsection{Overall Resolution Rates}
 
-Table~\ref{tab:overall} presents the overall resolved attempt counts and rates with 95\% Wilson confidence intervals.
+Table~\ref{tab:overall} presents the overall resolved attempt counts and rates with descriptive 95\% Wilson intervals.
 
 \begin{table}[h]
 \centering
@@ -285,7 +285,7 @@ Table~\ref{tab:overall} presents the overall resolved attempt counts and rates w
 \end{tabular}
 \end{table}
 
-The overall difference of $+$1.1 pp is not statistically significant; the 95\% confidence intervals overlap substantially. This finding---that the aggregate effect is near zero---is the first indication that summarizing by a global average conceals strongly heterogeneous sub-effects, motivating the zone-based analysis in Section~\ref{sec:zone}.
+The aggregate difference is small ($+$1.1 pp). The intervals are descriptive only: with-memory attempts are sequentially dependent by design, so we do not make an attempt-level significance claim. The near-zero aggregate motivates the zone-based analysis in Section~\ref{sec:zone}.
 
 Table~\ref{tab:per_instance} provides per-instance results with token statistics.
 
@@ -400,7 +400,7 @@ Post-success consistency & 52.0\% & 48.1\% \\
 \end{tabular}
 \end{table}
 
-Coverage improves from 75.0\% to 100.0\% at \texttt{resolved@10}, but the average first resolved attempt becomes later (1.7 to 3.2) and post-success consistency decreases slightly (52.0\% to 48.1\%). T1-A fires 251 times across 40 attempts, whereas T1-C produces no verdicts because ordinary \texttt{submit} actions lack inline patch text. Follow-up checks make T1-C observable, but its decisions remain dominated by \texttt{approve} or \texttt{unavailable}. We therefore interpret this study as preliminary evidence of coverage amplification, not as a mature reliability improvement. The SymPy failures further show that a pre-submit critic cannot address exploration runs that never produce a candidate patch.
+Observed coverage changes from 75.0\% to 100.0\% at \texttt{resolved@10}, but the average first resolved attempt becomes later (1.7 to 3.2) and post-success consistency decreases slightly (52.0\% to 48.1\%). T1-A fires 251 times across 40 attempts, whereas T1-C produces no verdicts because ordinary \texttt{submit} actions lack inline patch text. Follow-up checks make T1-C observable, but its decisions remain dominated by \texttt{approve} or \texttt{unavailable}. We therefore interpret this study as a preliminary coverage signal, not as a mature reliability improvement. The SymPy failures further show that a pre-submit critic cannot address exploration runs that never produce a candidate patch.
 
 \begin{table}[h]
 \centering
@@ -496,12 +496,12 @@ Han, H., Wang, Y., Shomer, H., Guo, K., Ding, J., Lei, Y., Halappanavar, M., Ros
 \newblock arXiv:2501.00309.
 
 \bibitem{arora2024masai}
-Arora, D., Naik, N., Aggarwal, P., Bhatt, S., Chandel, A., Dixit, A., Garg, A., Garg, N., Goyal, N., Jain, A., \& Singla, P. (2024).
+Arora, D., Sonwane, A., Wadhwa, N., Mehrotra, A., Utpala, S., Bairi, R., Kanade, A., \& Natarajan, N. (2024).
 \newblock \textit{MASAI: Modular Architecture for Software-engineering AI Agents}.
 \newblock arXiv:2406.11638.
 
 \bibitem{zan2024marscode}
-Zan, D., Liu, Z., Wen, H., Li, H., Zhao, Q., Liu, S., \& Luo, J. (2024).
+Liu, Y., Gao, P., Wang, X., Liu, J., Shi, Y., Zhang, Z., \& Peng, C. (2024).
 \newblock \textit{MarsCode Agent: AI-native Automated Bug Fixing}.
 \newblock arXiv:2409.00899.
 
@@ -535,10 +535,6 @@ Li, H., Shi, Y., Lin, S., Gu, X., Lian, H., Wang, X., Jia, Y., Huang, T., \& Wan
 \newblock \textit{SWE-Debate: Competitive multi-agent debate for software issue resolution}.
 \newblock arXiv:2507.23348.
 
-\bibitem{gerevini2006pddl3}
-Gerevini, A., \& Long, D. (2006).
-\newblock \textit{Preferences and soft constraints in PDDL3}.
-\newblock In \textit{ICAPS Workshop on Planning with Preferences and Soft Constraints}, 46--53.
 \end{thebibliography}
 
 \end{document}
