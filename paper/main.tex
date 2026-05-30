@@ -371,66 +371,16 @@ The ceiling zone token increase ($+15.5\%$) reflects a different dynamic: memory
 
 \subsection{Submission Behavior Analysis}
 
-Table~\ref{tab:exit} presents the distribution of exit statuses observed in agent trajectories.
-
-\begin{table}[h]
-\centering
-\caption{Exit status distribution across 91 nomem and 89 with\_mem trajectory files.}
-\label{tab:exit}
-\begin{tabular}{lcccc}
-\toprule
-\textbf{Exit Status} & \textbf{nomem $n$} & \textbf{nomem \%} & \textbf{with\_mem $n$} & \textbf{with\_mem \%} \\
-\midrule
-\texttt{submitted} & 80 & 87.9\% & 80 & 89.9\% \\
-\texttt{None} (Watchdog kill) & 9 & 9.9\% & 8 & 9.0\% \\
-\texttt{submitted (exit\_error)} & 2 & 2.2\% & 0 & 0\% \\
-\texttt{exit\_error} & 0 & 0\% & 1 & 1.1\% \\
-\midrule
-Total & 91 & & 89 & \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The Watchdog trigger rate is nearly identical between conditions (9.9\% vs. 9.0\%), confirming that the time-fairness mechanism functions as intended and that the \texttt{with\_mem} condition is not disproportionately spending time on memory overhead. The \texttt{submitted} rate is slightly higher in the \texttt{with\_mem} condition (89.9\% vs. 87.9\%), suggesting that memory guidance marginally improves the agent's ability to reach a submission state within the budget.
+Across the retained trajectory files, 80/91 nomem attempts and 80/89 with-memory attempts reach \texttt{submitted}. Watchdog kills occur at similar rates (9/91 vs. 8/89), indicating that memory overhead does not disproportionately consume the effective agent-time budget.
 
 %=====================================================
 \subsection{Lightweight Multi-Agent Auxiliary Study}
 \label{sec:multiagent}
 %=====================================================
 
-The main Agent-mem experiment evaluates whether structured cross-attempt memory improves repeated code-repair attempts. We additionally study whether lightweight auxiliary agents can improve the \emph{use} of that memory without replacing the underlying SWE-agent executor or changing the Docker evaluation environment. This section reports a targeted auxiliary study rather than a full benchmark-scale evaluation. Its purpose is to characterize coverage gains and failure boundaries of multi-agent scaffolding over Agent-mem.
+We additionally examine lightweight scaffolding that changes how memory is used without replacing the SWE-agent executor. Three independently configurable modules were implemented: T1-A reformulates hints for the current phase (\texttt{explore}, \texttt{localized}, \texttt{fixing}, or \texttt{pre\_submit}); T1-B writes interim localization or progress cards; and T1-C reviews candidate patches before submission. The reported auxiliary experiment evaluates T1-A + T1-C on four aligned historical instances with ten attempts each. T1-B is excluded to avoid confounding attribution.
 
-\subsubsection{Design Motivation}
-
-Agent-mem stores and retrieves structured experience, but the retrieved cards are still injected as textual guidance. This leaves three unresolved questions:
-
-\begin{enumerate}
-    \item Can memory hints be reformulated according to the current execution phase, so that exploration receives localization guidance while repair and pre-submission receive more concrete invariant checks?
-    \item Can intermediate progress discovered inside an attempt be written early enough to support later attempts?
-    \item Can a pre-submit critic detect when a candidate patch conflicts with historical success invariants or repeats known failure signatures?
-\end{enumerate}
-
-We implement three Tier-1 auxiliary modules:
-
-\begin{itemize}
-    \item \textbf{T1-A: Memory Reformulation Agent.} Rewrites retrieved memory hints according to the inferred execution phase (\texttt{explore}, \texttt{localized}, \texttt{fixing}, or \texttt{pre\_submit}). Its goal is to reduce phase-mismatch: for example, exploration should emphasize files and functions rather than full patch diffs.
-
-    \item \textbf{T1-B: Async Interim Memory Mining.} Writes lightweight interim localization or progress cards during an attempt when localization patterns, first edits, or test-pass signals are observed. This module was implemented and unit-tested but was not included in the main auxiliary experiment, because it introduces a separate cross-attempt live-memory mechanism that would confound attribution.
-
-    \item \textbf{T1-C: Pre-Submit Critic Agent.} Reads the patch diff, issue context, BugInvariantCard, BugAntiPatternCard, and test output before submission, returning \texttt{approve}, \texttt{revise}, or \texttt{reject}. In principle, \texttt{revise} injects a \texttt{[Critic Review]} hint and \texttt{reject} blocks repeated failure modes.
-\end{itemize}
-
-All modules are independently controlled by environment variables and default to off. The auxiliary experiments focus on T1-A + T1-C, because this combination directly targets the two most plausible limitations of Agent-mem: phase-insensitive hint injection and insufficient pre-submit semantic checking.
-
-\subsubsection{Targeted Experimental Protocol}
-
-The multi-agent study uses a targeted aligned subset rather than the full F3 set. This choice is deliberate: repeated-attempt SWE-bench experiments are expensive, and the purpose here is mechanism analysis rather than a new headline benchmark. We select four historical instances for which phase9-v2 control data exists and where memory behavior is informative. Each instance is run for 10 attempts under the T1-A + T1-C configuration, yielding 40 attempts.
-
-The primary metric is \texttt{resolved@k}: whether an instance is resolved at least once within the first $k$ attempts. This is the natural metric for cross-attempt memory. The framework is not designed to force success on the first attempt; rather, it is designed to accumulate and reuse experience once informative outcomes have occurred. Consequently, the absence of a uniform early-success improvement is not itself a failure. What matters is whether the system increases repeated-attempt coverage and whether successful experience can be reused reliably after it is observed.
-
-\subsubsection{Main Multi-Agent Results}
-
-Table~\ref{tab:multiagent_overall} summarizes the aligned-set comparison between phase9-v2 control and T1-A + T1-C.
+Table~\ref{tab:multiagent_overall} reports \texttt{resolved@k}, which is appropriate for a cross-attempt system: the goal is to increase the probability that at least one later attempt benefits from accumulated evidence.
 
 \begin{table}[h]
 \centering
@@ -450,164 +400,42 @@ Post-success consistency & 52.0\% & 48.1\% \\
 \end{tabular}
 \end{table}
 
-The main positive signal is coverage: \texttt{resolved@10} improves from 75.0\% to 100.0\% on the aligned subset. This indicates that lightweight multi-agent scaffolding can act as a \emph{coverage amplifier}: across repeated attempts, it increases the probability that at least one attempt reaches a valid patch. However, the improvement does not uniformly translate into earlier resolution or stronger post-success consistency. The average first resolved attempt becomes later (1.7 to 3.2), and post-success consistency slightly decreases (52.0\% to 48.1\%). We therefore avoid interpreting this auxiliary study as evidence of a mature consistency-improving module.
-
-Table~\ref{tab:multiagent_instance} shows the per-instance treatment results and mechanism signals.
-
-\begin{table}[h]
-\centering
-\caption{Per-instance T1-A + T1-C results and mechanism signals.}
-\label{tab:multiagent_instance}
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{lcccc}
-\toprule
-\textbf{Instance} & \textbf{Resolved} & \textbf{T1-A events} & \textbf{T1-C verdicts} & \textbf{Interpretation} \\
-\midrule
-\texttt{astropy\_\_astropy-12057} & 5/10 & 60 & 0 & approximately neutral \\
-\texttt{sympy\_\_sympy-13551} & 4/10 & 49 & 0 & interference on easy case \\
-\texttt{sympy\_\_sympy-13031} & 1/10 & 67 & 0 & strongest negative transfer \\
-\texttt{django\_\_django-11278} & 7/10 & 75 & 0 & strongest positive signal \\
-\midrule
-\textbf{Total} & 17/40 & 251 & 0 & T1-A active; T1-C inactive \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The mechanism table is crucial. T1-A fires 251 times across 40 attempts, showing that memory reformulation is active. T1-C, however, produces zero verdicts. Subsequent log review showed that this is not a statistics bug: ordinary \texttt{submit} actions did not contain inline patch diffs, so the critic often had no \texttt{patch\_text} to inspect and silently fell back to allowing the submission. Thus the main multi-agent run supports T1-A activity and coverage improvement, but it does not support a claim that T1-C semantically corrected patches.
-
-\subsubsection{Follow-Up Validation Summary}
-
-Because T1-C produced zero verdicts in the main auxiliary run, we performed small follow-up validations on the most informative positive and negative cases. These runs are not large enough to support an independent performance claim, so we report only the mechanism-level conclusion here and provide the detailed counts in Appendix~\ref{app:multiagent_followup}. After engineering fixes, T1-C became observable, but its decisions were dominated by \texttt{approve} or \texttt{unavailable} rather than stable \texttt{revise}/\texttt{reject} corrections. The follow-up runs also showed that \texttt{sympy\_\_sympy-13031} is dominated by exploration non-convergence and incomplete attempts. This is a structural mismatch for a pre-submit critic: the critic can assess a candidate patch only after such a patch exists, but the dominant failure mode is often the absence of a candidate patch.
-
-\subsubsection{Interpretation}
-
-The multi-agent extension provides a useful but bounded result. It improves repeated-attempt coverage on the targeted aligned subset and produces a strong Django positive case. At the same time, the follow-up experiments show that the mechanism is not yet stable enough to claim per-attempt reliability improvement. This is consistent with the broader Agent-mem thesis: cross-attempt memory primarily helps after experience has been accumulated. It is not expected to make the first attempt immediately successful. The relevant question is whether accumulated evidence is preserved, retrieved, and reused effectively across later attempts.
-
-Under this criterion, the current multi-agent system remains preliminary. T1-A is active and may help in the Django case, but its causal role requires offline trace analysis. T1-C improves observability after engineering fixes, but without executable feedback it tends toward \texttt{approve} or \texttt{unavailable}. The most rigorous conclusion is therefore:
-
-\begin{quote}
-Lightweight multi-agent scaffolding over Agent-mem can amplify repeated-attempt coverage, but current pre-submit critic and reformulation mechanisms expose important boundary conditions. Reliable improvement likely requires exploration-phase closure control and executable or deterministic critic gates, rather than additional LLM-only critique at submission time.
-\end{quote}
+Coverage improves from 75.0\% to 100.0\% at \texttt{resolved@10}, but the average first resolved attempt becomes later (1.7 to 3.2) and post-success consistency decreases slightly (52.0\% to 48.1\%). T1-A fires 251 times across 40 attempts, whereas T1-C produces no verdicts because ordinary \texttt{submit} actions lack inline patch text. Follow-up checks make T1-C observable, but its decisions remain dominated by \texttt{approve} or \texttt{unavailable}. We therefore interpret this study as preliminary evidence of coverage amplification, not as a mature reliability improvement. The SymPy failures further show that a pre-submit critic cannot address exploration runs that never produce a candidate patch.
 
 %=====================================================
 \section{Discussion}
 %=====================================================
 
 \subsection{Interpreting the Exploratory Zone Pattern}
-
-The zone-based results in Table~\ref{tab:zone} should be interpreted as an exploratory pattern, not as an independently validated theory. The groups are defined from the same nomem outcomes used in the analysis, and the experiment contains only two intermediate instances, two zero-resolution instances, and five ceiling instances. This design is useful for diagnosis, but it does not establish a population-level law over SWE-bench.
-
-Within that limitation, the pattern is consistent with a simple competence-information interpretation. In the intermediate group, the agent sometimes solves the bug without memory, suggesting that it has the required repair capability but suffers from trajectory variance. Structured memory may reduce this variance by pointing to relevant anchors, successful edits, or known-bad alternatives. In the ceiling group, by contrast, the agent already solves every nomem attempt; additional memory can become a competing signal rather than useful guidance. The severe \texttt{sympy\_\_sympy-13551} degradation illustrates this risk, while \texttt{astropy\_\_astropy-14995} shows that ceiling cases are not uniformly harmed.
-
-The practical implication is therefore conditional rather than universal: cross-attempt memory should not be enabled blindly. A deployable system would need an instance-level or early-trajectory estimator that decides whether memory is likely to help, remain neutral, or interfere.
-
-\subsection{Why Early Success Is Not the Primary Objective}
-
-It is important not to evaluate cross-attempt memory solely by early-attempt metrics such as \texttt{resolved@1}. Agent-mem is not intended to make the first attempt immediately better in all cases. The core mechanism is temporal: once an attempt succeeds or fails informatively, the system converts that outcome into structured experience that later attempts can retrieve, validate, and reuse. Therefore, \texttt{resolved@k} for larger $k$, post-success reuse behavior, and token efficiency after memory accumulation are more faithful measures of the intended effect.
-
-This also explains the multi-agent auxiliary result. The T1-A + T1-C extension improves aligned-set \texttt{resolved@10} but does not uniformly improve early success. Before informative memory exists, the auxiliary agents have limited reliable signal to exploit. The more important question is whether the framework preserves useful experience once it appears. In the present implementation, this is only partially achieved: the main Agent-mem experiment shows suggestive repeated-attempt effects, while the multi-agent extension improves coverage but not post-success consistency. This distinction matters for interpretation: lack of early-success improvement is acceptable for a cross-attempt memory framework; lack of stable reuse after success remains an open engineering problem.
-
-\subsection{Capability Unlock in the Zero-Resolution Zone}
 \label{sec:unlock}
 
-The \texttt{sympy-13031} result (0\%$\to$60\%) is the strongest single-instance positive signal in the study. Without memory, the agent does not resolve this bug in 10 attempts; with memory augmentation, 6 of 10 attempts succeed. This is consistent with the hypothesis that accumulated failure-side evidence helps the agent avoid previously explored wrong directions.
+The groups in Table~\ref{tab:zone} are defined from the same nomem outcomes being analyzed and therefore support hypothesis generation, not a population-level law. Within that limitation, the pattern is consistent with a competence-information interpretation: memory can reduce trajectory variance when the base agent sometimes solves an instance, but can become a competing signal when the base agent already solves reliably. Larger \texttt{resolved@k} values, post-success reuse, and token cost are therefore more informative than \texttt{resolved@1} alone for cross-attempt systems.
 
-However, this result should not be over-interpreted as a general capability law. It is one instance with 10 attempts per condition, and stochastic variation near the model's capability boundary remains a plausible alternative explanation. The mechanism claim is therefore modest: the observed trajectories suggest that BugAntiPatternCards may have helped direct later attempts away from repeated failure signatures, but larger matched samples would be required to establish the effect as systematic.
-
-The contrast with \texttt{astropy-13033} (0\%$\to$0\%) is equally important. Memory does not unlock every zero-resolution instance. Some bugs may be reachable with accumulated guidance; others may remain outside the agent's repair capability under the current interface, model, or time budget.
-
-\subsection{Memory Interference and Ceiling Degradation}
-
-The \texttt{sympy-13551} case ($-50$ pp, $+138\%$ tokens) is the most severe failure mode in the experiment and warrants detailed discussion. This instance has nomem solve rate 100\%: every unguided attempt succeeds independently. Under memory augmentation, only 5 of 10 attempts succeed.
-
-Token analysis reveals the mechanism: with\_mem attempts on \texttt{sympy-13551} consume on average 1,983,016 input tokens, compared to 832,212 for nomem---a 138\% increase. This suggests that the agent is executing substantially longer trajectories, exploring more before arriving at a resolution (or failing within budget). The memory cards, derived from the earliest successful attempts, encode a specific repair strategy. When later attempts draw on these cards via VERBATIM\_REUSE or EXPLORE\_AROUND\_INVARIANT strategy, they are anchored to this encoded strategy. If subsequent attempts encounter slight environmental variations (e.g., a test that passes with a structurally different but equivalent patch), the memory anchor may cause the agent to reject valid solutions in favor of the memorized approach, which no longer applies cleanly.
-
-This suggests a critical limitation of the current framework: the governance lifecycle promotes cards on the first few \texttt{resolved} outcomes, but does not account for whether the promoted cards remain maximally informative as the attempt index increases. A memory freshness mechanism---reducing the weight of early-promoted cards in favor of more recent outcomes---could mitigate this.
-
-\subsection{Implications of the Multi-Agent Auxiliary Study}
-
-The multi-agent study in Section~\ref{sec:multiagent} clarifies where lightweight auxiliary agents are useful and where they are structurally mismatched to the failure mode. T1-A appears plausible as a hint-shaping mechanism: it can reduce the burden on the main agent by rewriting retrieved cards into phase-appropriate guidance. The Django positive case suggests that such reformulation can be beneficial when the task requires reliable reuse of framework-specific localization and repair cues. However, T1-A may also distort high-value raw details, especially in instances where the original BugAntiPatternCard or BugInvariantCard contains precise tokens that should not be paraphrased away.
-
-T1-C exposes a different limitation. LLM-based critics are attractive because they can inspect semantic patch content, but without executable feedback their decisions are weakly grounded. Our follow-up experiments show that once the critic is made observable, it tends to approve or become unavailable rather than produce stable corrective decisions. This aligns with the broader limitation of self-refinement methods: verbal feedback is useful when the evaluation rubric is explicit, but code repair ultimately depends on repository-level test execution. A critic that can see a diff but cannot execute it is positioned to detect obvious mismatches, not to certify repair correctness.
-
-The most important boundary finding is the SymPy failure mode. \texttt{sympy\_\_sympy-13031} is dominated by exploration non-convergence and incomplete attempts. A pre-submit critic intervenes after a patch candidate exists, so it cannot solve the primary failure mode of never reaching a patch candidate. Effective intervention for such cases must happen earlier, during exploration and localization, through closure control, exploit forcing, or structured reuse of failure-side evidence.
+The strongest positive single case is \texttt{sympy-13031} (0/10$\to$6/10), which is consistent with failure-side cards discouraging repeated wrong directions. However, stochastic variation remains a plausible alternative explanation, and \texttt{astropy-13033} remains unresolved in both conditions. The strongest negative case is \texttt{sympy-13551} (10/10$\to$5/10, $+$138.3\% tokens), suggesting that promoted cards can anchor later attempts to an unhelpful path. Conditional activation and memory freshness are therefore important deployment directions.
 
 \subsection{Threats to Validity and Future Work}
 
-\textbf{Sample size.} With $n=10$ attempts per instance and 9 diagnostic instances, per-instance confidence intervals are wide (typical width 50--60 pp). The grouped findings in Table~\ref{tab:zone} aggregate 20 or 50 attempts, but the groups contain few distinct instances. The results should therefore be read as evidence for hypotheses and failure modes, not as precise estimates of SWE-bench-wide performance.
+\textbf{Scale and selection.} The controlled study contains nine diagnostic instances with ten attempts per condition. The instances were selected to expose different difficulty regimes rather than sampled randomly, and the zone groups are defined post hoc. Independent random or stratified validation is required.
 
-\textbf{Instance selection and post-hoc grouping.} The F3 instances were selected diagnostically to span difficulty regimes for Kimi, not sampled randomly from SWE-bench Full. In addition, the zero, intermediate, and ceiling groups are defined using the same nomem outcomes used in the analysis. This creates a risk of confirmation bias and circular interpretation. A stronger validation would first define the grouping rule on a pilot set and then test it on an independent random or stratified sample.
+\textbf{Model and module attribution.} The reported results use Kimi and enable all five Agent-mem modules together. Cross-model evaluation and a minimal ablation over A+B, A+B+C, and the full system are needed before attributing gains to specific mechanisms.
 
-\textbf{Single model.} All reported controlled results use Kimi (kimi-latest). A preliminary DeepSeek V4 Pro experiment was conducted, but DeepSeek achieves near-100\% nomem solve rates on the F3 instances, placing nearly all selected instances in a ceiling-like regime. This shows that the diagnostic set is partly model-calibrated. Cross-model validation requires either a larger instance pool or model-specific stratified sampling.
+\textbf{Efficiency metrics.} Input tokens are consistently available but incomplete as a cost measure. Future evaluation should include output tokens, end-to-end wall-clock time, bridge overhead, and resolution-cost Pareto curves.
 
-\textbf{Module ablation.} The F3 experiment enables all five modules simultaneously. This prevents strong attribution to any individual module. The strongest next ablation is not a full factorial design, which would be expensive, but a minimal comparison between core memory cards (Modules A+B), core cards plus gate (A+B+C), and the full system (A+B+C+D+E).
-
-\textbf{Efficiency metrics.} We report input tokens because they are consistently available in the trajectory statistics. This is only a partial efficiency measure. A more complete cost analysis should include output tokens, end-to-end wall-clock time, memory-server overhead, and a Pareto view of resolution rate versus total token cost.
-
-\textbf{Ceiling mitigation.} The exploratory zone pattern implies that Agent-mem should be activated selectively, especially when the base agent is already reliable. A practical deployment would require an upfront or early-trajectory difficulty estimator before activating memory injection. Designing such an estimator is an open problem.
-
-\textbf{Multi-agent sample size and attribution.} The multi-agent extension is evaluated as a targeted auxiliary study rather than a benchmark-scale experiment. Its 4-instance aligned set and subsequent 2-case/1-case validation runs are sufficient for mechanism exploration, but not for a standalone performance claim. In particular, the Django positive case and SymPy negative case should be interpreted symmetrically: together they show the promise and boundary of lightweight scaffolding, not an unconditional improvement.
-
-\textbf{Offline trace analysis.} The most immediate next experiment is zero-cost and does not require additional API calls. Existing trajectories can be analyzed to compare T1-A reformulations in resolved and unresolved attempts. For Django, the analysis should ask whether reformulated hints are followed by earlier transitions from broad exploration to localization or editing. For SymPy, it should compare raw phase9-v2 memory hints against T1-A-rewritten hints to test whether reformulation removes anti-pattern keywords or exact anchors that were useful in the original memory framework. The expected output is not a causal proof, but supporting evidence for whether T1-A acts as useful phase adaptation or harmful paraphrase.
-
-\textbf{\texttt{resolved@k} curve analysis.} A second low-cost analysis is to plot \texttt{resolved@k} for $k \in \{1,3,5,7,10\}$ across nomem, Agent-mem, and the multi-agent extension where aligned data exist. This representation is better suited to cross-attempt systems than a single \texttt{resolved@1} number. It would make explicit whether a method improves early success, late coverage, or both. For the current multi-agent extension, we expect the honest interpretation to be late coverage amplification rather than consistent early convergence.
-
-\textbf{Executable or deterministic critics.} The T1-C results suggest that LLM-only critique is insufficient for code repair unless grounded in executable evidence. A future critic should either (i) run a small deterministic pre-submit validation suite, (ii) use rule-based checks over patch signatures, function anchors, and known anti-pattern hashes, or (iii) combine LLM reasoning with a hard validator that can reject non-executable or known-bad patches. This future work should be treated as a new experiment, not as an explanation of the current T1-C result.
-
-\textbf{Exploration-phase closure control.} The SymPy boundary case shows that incomplete-dominated failures require intervention before submission. A concrete future direction is a closure controller that detects repeated exploration without edits, repeated reproduction without patch formation, or repeated identical precheck diffs. The controller should then force one of three actions: exploit a known invariant, inspect the current diff and submit a minimal patch, or explicitly switch to a different file/function candidate. Metrics should include incomplete rate, first edit step, first patch step, and \texttt{resolved@k}.
-
-\textbf{T1-B and live memory.} T1-B remains a plausible extension for parallel or near-parallel attempts, where interim localization information can reduce duplicate exploration. We do not include it in the current paper's main auxiliary result because it would confound attribution, but future work should evaluate it in a setting where multiple attempts run concurrently and can benefit from live interim cards.
-
-\textbf{Conditional activation.} The exploratory zone pattern and the multi-agent negative cases both imply that memory and auxiliary agents should not be activated uniformly. A practical system should estimate whether an instance is likely to benefit from memory before choosing an intervention policy. Lightweight predictors could use early trajectory signals such as number of located files, test reproduction success, first-edit step, and patch formation latency. This would allow the system to enable memory strongly when the base agent appears uncertain, emphasize anti-pattern guidance in repeated-failure cases, and suppress memory when the base agent is already reliable.
+\textbf{Multi-agent extension.} The four-instance auxiliary study is a mechanism probe, not a standalone performance claim. Future work should compare raw and reformulated hints offline, ground critics in executable checks, and intervene earlier when exploration fails to produce a patch.
 
 %=====================================================
 \section{Conclusion}
 %=====================================================
 
-We have presented Agent-mem, a training-free cross-attempt experience memory framework for LLM-based code repair agents, and reported a controlled diagnostic evaluation across 180 attempts on nine SWE-bench Full instances. The aggregate improvement is small (+1.1 pp), but the per-instance results reveal a heterogeneous pattern: memory is beneficial on the two intermediate-difficulty instances, harmful on several ceiling instances, and mixed on zero-resolution instances. Because the groups are post hoc and the sample is small, we treat this as an exploratory empirical pattern rather than a validated theory.
+We presented Agent-mem, a training-free cross-attempt memory framework for LLM-based code repair, and evaluated it across 180 attempts on nine SWE-bench Full instances. Aggregate improvement is small (+1.1 pp), but the diagnostic results reveal heterogeneous behavior: positive signals on intermediate-difficulty instances, interference on several ceiling cases, and mixed outcomes on zero-resolution cases. Because the groups are post hoc and the sample is small, this is an exploratory pattern rather than a validated theory.
 
-These findings have practical implications for agent deployment. Applying memory unconditionally can obscure localized benefits and may degrade performance when the base agent is already capable. Conditional activation based on instance-level or early-trajectory difficulty estimation, combined with ceiling-effect mitigation mechanisms such as memory freshness and confidence decay, are important open research directions.
-
-The auxiliary multi-agent study reinforces this cautious conclusion. Lightweight agentic scaffolding can improve repeated-attempt coverage on a targeted aligned subset, but it also shows that more agents do not automatically produce more reliable repair. T1-A reformulation may help when phase-appropriate reuse is needed, while T1-C shows that pre-submit verbal critics without executable grounding are insufficient for exploration-dominated failures. Thus, the path forward is not simply to add more critic calls, but to design conditional memory activation, exploration-phase closure control, and executable or deterministic validation mechanisms.
-
-Beyond the empirical findings, Agent-mem's design---non-invasive hook integration, semantically-typed cards with governance lifecycles, modular independently-activatable components, and time-fair experimental control---provides a reusable framework for studying cross-attempt learning in code repair contexts.
+The practical implication is conditional deployment: memory should be activated when early evidence suggests that it will reduce search variance, and suppressed when the base agent is already reliable. The auxiliary study further shows that phase-aware hint shaping may improve repeated-attempt coverage, whereas verbal pre-submit critics require executable grounding and cannot solve exploration non-convergence. Agent-mem's hook integration, structured cards, governance lifecycle, and time-fair evaluation provide a reusable basis for studying these questions.
 
 %=====================================================
 \section*{Code Availability}
 %=====================================================
 
 The Agent-mem implementation, lightweight multi-agent extension, reviewer quick-check scripts, experiment launchers, configuration templates, and selected attempt-level evidence are available at \url{https://github.com/PT-VU/Agent_mem}.
-
-%=====================================================
-\appendix
-\section{Auxiliary Multi-Agent Follow-Up Details}
-\label{app:multiagent_followup}
-%=====================================================
-
-Table~\ref{tab:multiagent_followup_appendix} reports the small follow-up validations used to inspect the T1-C critic and closure-control behavior. These runs are included for transparency and mechanism diagnosis only; they are not used as benchmark-scale evidence.
-
-\begin{table}[h]
-\centering
-\caption{Follow-up validation details for the lightweight multi-agent extension.}
-\label{tab:multiagent_followup_appendix}
-\begin{tabular}{llll}
-\toprule
-\textbf{Run} & \textbf{Scope} & \textbf{Attempts} & \textbf{Outcome} \\
-\midrule
-Stage2-01 & SymPy + Django & 20 & \texttt{resolved@10}=100\% \\
-Stage2-01 SymPy & \texttt{sympy-13031} & 10 & 2/10, first=6 \\
-Stage2-01 Django & \texttt{django-11278} & 10 & 5/10, first=4 \\
-Stage2-02 & SymPy + Django & 10 & 1/10, incomplete=4 \\
-Stage3 closure & SymPy only & 5 & 0/5, incomplete=4 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Stage2-01 made T1-C observable, but all critic verdicts were
-\texttt{approve}. The per-instance Stage2-01 rows show modest SymPy recovery
-and a weaker reproduction of the Django positive signal. Stage2-02 indicates
-that critic behavior remained unstable after additional guards. The Stage3
-closure run remained dominated by exploration non-convergence.
 
 %=====================================================
 \section*{Acknowledgments}
