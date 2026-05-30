@@ -76,6 +76,5 @@ environment. See `docs/reproducibility.md`.
 ## Public Snapshot Policy
 
 This is an English-only public copy assembled from the research workspace.
-Implementation logic and selected evidence are retained. Historical Chinese
-notes were replaced by short English reports. Large raw run directories were
-not copied because they contain redundant trajectories and runtime state.
+Implementation logic and selected evidence are retained. Large raw run directories were
+not included because they contain redundant trajectories and runtime state.
