@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-05-08T18:23:14+02:00",
+  "experiment_type": "f3_9instances_nomem_withmem_watchdog",
+  "run_root": "/home/pt/SWE-bench/PDDL_work_mem/06_artificial_intelligence/experiments/final_validation/phase9_v2/phase9_f3_9inst_both_watchdog_20260506_045411",
+  "framework_version": "phase9_v2c_6fixes_watchdog",
+  "groups": ["nomem", "with_mem"],
+  "repeats": 10,
+  "instances": [
+    "django__django-12284", "django__django-16139", "django__django-12497",
+    "sympy__sympy-24066", "sympy__sympy-13031", "sympy__sympy-13551",
+    "astropy__astropy-12907", "astropy__astropy-14995", "astropy__astropy-13033"
+  ],
+  "nomem_prior_estimates": {
+    "django__django-12284":  "30% (phase8)",
+    "django__django-16139":  "26% (phase8)",
+    "django__django-12497":  "25% (phase8)",
+    "sympy__sympy-24066":    "33% (phase8)",
+    "sympy__sympy-13031":    "unknown (Verified)",
+    "sympy__sympy-13551":    "unknown (Verified)",
+    "astropy__astropy-12907": "23% (phase8)",
+    "astropy__astropy-14995": "45% (phase8)",
+    "astropy__astropy-13033": "unknown (Verified)"
+  }
+}

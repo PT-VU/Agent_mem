@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-05-18T00:00:00+02:00",
+  "subset": "full",
+  "split": "test",
+  "selection_mode": "manual_stage2_critic_guard_2case",
+  "repeats": 5,
+  "group": "stage2_critic_guard_2case",
+  "t1_flags": {"T1A": true, "T1B": false, "T1C": true},
+  "upgrade_flags": {
+    "SWE_AGENT_T1A_MAX_REFORMATS_PER_ATTEMPT": 3,
+    "SWE_AGENT_T1C_USE_PRECHECK_DIFF": true,
+    "SWE_AGENT_T1C_SPLIT_FALLBACK_APPROVE": true,
+    "SWE_AGENT_T1C_DETERMINISTIC_GUARD": true,
+    "SWE_AGENT_T1C_REVISE_DUPLICATE_PRECHECK": true,
+    "SWE_AGENT_T1C_UNAVAILABLE_POLICY": "revise_once"
+  },
+  "instance_ids": [
+    "sympy__sympy-13031",
+    "django__django-11278"
+  ]
+}

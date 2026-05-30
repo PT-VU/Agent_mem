@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-05-17T00:00:00+02:00",
+  "subset": "full",
+  "split": "test",
+  "selection_mode": "manual_stage2_upgrade_2case",
+  "repeats": 10,
+  "group": "stage2_upgrade_t1a_t1c_gated_2case",
+  "t1_flags": {"T1A": true, "T1B": false, "T1C": true},
+  "upgrade_flags": {
+    "SWE_AGENT_T1A_MAX_REFORMATS_PER_ATTEMPT": 3,
+    "SWE_AGENT_T1C_USE_PRECHECK_DIFF": true
+  },
+  "instance_ids": [
+    "sympy__sympy-13031",
+    "django__django-11278"
+  ]
+}

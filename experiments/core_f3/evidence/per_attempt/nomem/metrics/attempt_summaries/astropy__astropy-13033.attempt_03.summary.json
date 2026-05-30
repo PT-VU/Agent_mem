@@ -1,0 +1,17 @@
+{
+  "run_id": "phase7_same_nomem_astropy__astropy-13033_attempt_03",
+  "dataset": "SWE-bench/SWE-bench test",
+  "scope": "Phase7 same-problem no-mem astropy__astropy-13033 attempt 03",
+  "planned_instances": 1,
+  "submitted_instances": 1,
+  "completed_instances": 1,
+  "resolved_instances": 0,
+  "unresolved_instances": 1,
+  "error_instances": 0,
+  "incomplete_instances": 0,
+  "incomplete_ids": [],
+  "solved_rate_on_planned": 0.0,
+  "solved_rate_on_submitted": 0.0,
+  "report_json": "/home/pt/SWE-bench/PDDL_work_mem/06_artificial_intelligence/experiments/final_validation/phase9_v2/phase9_f3_9inst_both_watchdog_20260506_045411/same_problem/nomem/metrics/attempt_reports/astropy__astropy-13033.attempt_03.official_eval.json",
+  "generated_at": "2026-05-08T20:26:54"
+}

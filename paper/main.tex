@@ -1,0 +1,694 @@
+\documentclass[runningheads]{llncs}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\title{Agent-mem: Cross-Attempt Experience Memory\\for LLM-Based Automated Code Repair}
+\titlerunning{Agent-mem: Cross-Attempt Experience Memory}
+
+\author{Tong Pei}
+\authorrunning{T. Pei}
+% TODO(author): add the official university affiliation and email address.
+% \institute{University Name, City, Country \email{author@example.com}}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Large language model agents for automated code repair typically execute each attempt in isolation, discarding knowledge accumulated through prior failures and successes. We present \textbf{Agent-mem}, a training-free cross-attempt experience memory framework that intercepts agent events through a non-invasive hook interface, stores semantically typed memory cards, and injects retrieved guidance into later attempts. Agent-mem records verified patch diffs, code anchors, and failure-side anti-patterns; governs card promotion using official evaluation outcomes; and applies configurable reuse, gating, and feedback modules.
+
+We evaluate Agent-mem on SWE-bench Full using Kimi (\texttt{kimi-latest}) in a controlled comparison across nine diagnostic instances, with ten attempts per condition (180 attempts total). A Watchdog timer excludes memory-server overhead from the agent's effective time budget. Aggregate resolution changes only slightly (68.9\% to 70.0\%), but per-instance results reveal heterogeneous behavior. In the two intermediate-difficulty instances, memory is associated with a $+$20 percentage point resolution increase and a 44.8\% reduction in input tokens. In zero-resolution instances, one case improves from 0/10 to 6/10 while another remains unresolved. In ceiling cases, memory can introduce interference. A targeted multi-agent auxiliary study further improves \texttt{resolved@10} from 75\% to 100\% on a four-instance aligned subset, while exposing limits of pre-submit critics. We treat these findings as diagnostic evidence and motivate conditional memory activation rather than unconditional deployment.
+
+\keywords{LLM agents \and automated code repair \and cross-attempt memory \and SWE-bench \and multi-agent systems}
+\end{abstract}
+
+%=====================================================
+\section{Introduction}
+%=====================================================
+
+The automated resolution of real-world software bugs has emerged as a challenging and practically significant benchmark for LLM-based agents. SWE-bench~\cite{jimenez2024swebench} formalizes this task by requiring agents to produce code patches that pass repository-level tests for real GitHub issues. Recent work has achieved remarkable progress: SWE-agent~\cite{yang2024sweagent} demonstrated that carefully designed Agent-Computer Interfaces (ACI) substantially improve agent performance; Agentless~\cite{xia2024agentless} showed that a simplified, hierarchical pipeline of localization followed by repair can be highly competitive; and modular architectures such as MASAI~\cite{arora2024masai} decompose the task into focused sub-problems to reduce context contamination.
+
+Despite these advances, a fundamental limitation persists across all existing approaches: \textbf{each attempt is treated as an episodic event with no persistent memory across runs}. When an agent fails to resolve a bug and is re-invoked---whether by a user, a pipeline, or an automated retry mechanism---it begins from scratch, with no knowledge of which repair strategies were already attempted and failed, which file locations were already verified, or which specific patch structures were empirically shown to be correct. This is not merely an efficiency problem; it is a reliability problem. Agents that repeat invalid actions, explore already-exhausted search directions, or reproduce known-bad patches are demonstrably wasting time budgets and failing to leverage the most informative signal available: their own prior experience with the exact same bug.
+
+Reflection and memory mechanisms have been studied in agent contexts. Reflexion~\cite{shinn2023reflexion} introduces verbal reinforcement learning by appending textual failure summaries to subsequent attempts. However, such approaches store experience as unstructured natural language, making it difficult to enforce correctness, ensure evidence-backing, or distinguish between soft guidance and hard constraints. Graph-augmented retrieval methods~\cite{han2024graphrag} improve access to structured relational information but do not specifically address the cross-attempt code repair scenario where the most valuable information is \emph{what happened on prior attempts at the same bug}.
+
+We introduce \textbf{Agent-mem}, a training-free cross-attempt experience memory framework designed for code repair agents operating on SWE-bench. Agent-mem addresses the knowledge persistence gap through three mechanisms. First, it represents experience as \emph{semantically typed memory cards} (BugInvariantCard, SuccessPathCard, BugAntiPatternCard) that distinguish between successful repair patterns and known failure modes, preserving the verbatim patch diff and code anchors needed for precise reuse. Second, it manages card quality through an \emph{evidence-backed governance lifecycle} in which candidate cards are promoted upon official evaluation success or suppressed upon failure, preventing low-confidence memories from corrupting future attempts. Third, it implements \emph{progressively stronger control signals}: cards are initially injected as soft guidance, but a pre-submission consistency gate can block known-bad patches before they are submitted, and a strategy scheduler decides per-attempt whether to attempt verbatim reuse of a verified fix or to explore around the known invariant.
+
+The central empirical contribution of this paper is a controlled repeated-attempt experiment (180 attempts across 9 instances) that reveals a \textbf{zone-dependent effectiveness pattern} for cross-attempt memory. The effectiveness of Agent-mem is not uniform across bug instances; it varies with the underlying solve rate of the agent without memory. In the intermediate difficulty group (20--70\% nomem solve rate), memory is beneficial in our data. In the ceiling group (100\% nomem solve rate), memory can be harmful. In the zero group, memory may either unlock a previously unreachable solution or fail completely. We frame this as an exploratory empirical pattern requiring independent validation, not as a universal theory.
+
+\paragraph{Contributions.} This paper makes four contributions:
+\begin{enumerate}
+    \item \textbf{Agent-mem framework}: A working, non-invasive implementation of cross-attempt memory for SWE-agent, comprising structured card types, five functional modules, a hint injection mechanism, and a time-fairness mechanism (Watchdog).
+    \item \textbf{Controlled repeated-attempt evaluation}: A time-fair SWE-bench Full evaluation with 180 attempts across 9 instances, comparing standard SWE-agent against a memory-augmented condition.
+    \item \textbf{Exploratory zone-dependent pattern}: Evidence that memory benefits are heterogeneous: positive in the intermediate group, mixed in the zero-resolution group, and negative in the ceiling group, including token-efficiency and single-instance capability-unlock signals.
+    \item \textbf{Multi-agent boundary analysis}: A targeted auxiliary study of lightweight multi-agent scaffolding over Agent-mem, showing repeated-attempt coverage improvement on a small aligned subset while exposing limits of pre-submit critics and exploration-phase closure control.
+\end{enumerate}
+
+%=====================================================
+\section{Related Work}
+%=====================================================
+
+\subsection{LLM Agents for Automated Code Repair}
+
+SWE-bench~\cite{jimenez2024swebench} established a rigorous benchmark for evaluating automated code repair on real GitHub issues, grounding evaluation in executable test correctness. SWE-agent~\cite{yang2024sweagent} introduced the Agent-Computer Interface (ACI) design principle---structured file editing tools, repository navigation, and command execution---and demonstrated that interface design substantially outweighs prompt-level adjustments. Agentless~\cite{xia2024agentless} proposed a two-phase pipeline of hierarchical localization followed by repair without persistent agent state, achieving competitive performance at significantly lower cost.
+
+Modular approaches have further improved performance by decomposing the task. MASAI~\cite{arora2024masai} partitions software engineering into sub-problems handled by specialized agents, avoiding long trajectories that contaminate context and degrade generation quality. MarsCode~\cite{zan2024marscode} combines code knowledge graphs with a multi-agent pipeline for planning, reproduction, localization, and patching, achieving top performance on SWE-bench Lite.
+
+A key limitation shared by all these approaches is the absence of cross-attempt persistence: each run discards all intermediate findings, and successive attempts are independent episodes. Agent-mem is designed to fill this gap.
+
+\subsection{Memory, Reflection, and Experience Reuse in LLM Agents}
+
+Reflexion~\cite{shinn2023reflexion} introduced verbal reinforcement learning, in which agents append natural language failure summaries to their context before re-attempting a task. While effective, this approach stores experience as unstructured prose, making it difficult to distinguish verified evidence from narrative inference, or to apply the experience as a hard constraint.
+
+ExpeL~\cite{zhao2024expel} learns from a collection of agent trajectories by extracting natural language insights for cross-task transfer. MemGPT~\cite{packer2023memgpt} develops long-term memory management for LLM agents with hierarchical storage. Generative Agents~\cite{park2023generative} use a memory stream and reflection mechanism for long-horizon social simulation. These works establish that external memory can improve agent performance across tasks, but none target the specific challenge of cross-attempt learning on a single, fixed bug instance where the most informative signal is the verbatim patch and the precise code location, not a linguistic summary.
+
+Graph-augmented retrieval~\cite{han2024graphrag} structures knowledge as a graph for improved retrieval, but focuses on general knowledge rather than attempt-specific experience. Our GraphStore builds on similar graph storage principles but is purpose-built for structured, evidence-backed repair experience.
+
+\subsection{Self-Refinement and Search-Based Agent Scaffolding}
+
+Self-Refine~\cite{madaan2023selfrefine} studies iterative generation, feedback, and refinement using the model's own feedback. This line of work is directly relevant to our pre-submit critic module: a critic without executable feedback can often identify surface-level issues, but its ability to make reliable semantic judgments is limited when the task requires repository-level test execution. Our results support this limitation in the code-repair setting: the critic becomes observable after engineering fixes, but it largely produces \texttt{approve} or \texttt{unavailable} rather than stable \texttt{revise}/\texttt{reject} decisions.
+
+Search-based agent methods such as Language Agent Tree Search (LATS)~\cite{zhou2023lats} show that expanding the search space can improve coverage under repeated sampling. Agent-mem and its lightweight multi-agent extension should be interpreted in this same repeated-attempt spirit: their primary objective is not necessarily to improve the first attempt, but to improve the probability that accumulated experience makes at least one later attempt converge to a valid patch.
+
+\subsection{Iterative and Multi-Attempt Code Repair}
+
+RepairAgent~\cite{bouzenia2024repairagent} applies Thompson Sampling to select among repair strategies across many independent rollouts, learning a distribution over which strategies work for which bug categories. Unlike Agent-mem, RepairAgent does not persist structured memory; it maintains strategy selection statistics but not the verbatim patch content or failure-mode signatures needed for precise avoidance.
+
+The multi-agent debate framework SWE-Debate~\cite{li2025swedebate} runs multiple agents in parallel and organizes structured debate rounds guided by code dependency graphs. This approach is complementary to Agent-mem: debate increases diversity within a single generation round, while Agent-mem accumulates knowledge across multiple attempt rounds. These two paradigms could be combined.
+
+Agent-mem is distinguished from prior work by three properties: (i) semantically-typed, evidence-backed cards that preserve verbatim diff content alongside natural language summaries; (ii) a governance lifecycle that explicitly promotes or suppresses cards based on official evaluation outcomes; and (iii) the pre-submission patch consistency gate, which can block known-bad patches before they are submitted, moving beyond pure guidance into partial enforcement.
+
+%=====================================================
+\section{Proposed Approach: Agent-mem}
+%=====================================================
+
+Agent-mem is implemented as a non-invasive extension to SWE-agent v1.1.0, using the abstract hook interface (\texttt{AbstractAgentHook}) to intercept agent events without modifying SWE-agent's core code. Figure~\ref{fig:architecture} provides a system overview.
+
+\begin{figure}[h]
+\centering
+\IfFileExists{fig1.png}{%
+\includegraphics[width=\textwidth]{fig1.png}%
+}{%
+\fbox{\begin{minipage}{0.92\textwidth}
+\centering
+\scriptsize
+\begin{tabular}{c}
+\textbf{Per-attempt execution} \\
+SWE-agent trajectory \\
+$\downarrow$ \\
+BridgeHook captures model-query, action, error, and run-done events \\
+$\downarrow$ \\
+Tool A retrieves memory cards \quad / \quad Tool B logs execution evidence \\
+$\downarrow$ \\
+Selected \texttt{[AgentMem Hints]} are injected into the next model query \\
+\midrule
+\textbf{Cross-attempt memory lifecycle} \\
+Trajectory, patch, test output, and official evaluation result \\
+$\downarrow$ \\
+EvaluationFeedbackProcessor writes BugInvariantCard or BugAntiPatternCard \\
+$\downarrow$ \\
+GraphStore persists cards, confidence, anchors, and patch signatures \\
+$\downarrow$ \\
+Later attempts retrieve promoted cards and avoid suppressed patterns
+\end{tabular}
+\end{minipage}}%
+}
+\caption{Agent-mem system architecture.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Memory Card Taxonomy}
+
+Agent-mem represents experience as \emph{semantically typed memory cards}, each corresponding to a distinct epistemic role in the repair process:
+
+\begin{itemize}
+    \item \textbf{BugInvariantCard}: Written on official evaluation success (\texttt{resolved}). Contains (a) a natural language description of the repair strategy, (b) \texttt{verbatim\_diff}: the verbatim patch content up to 8,192 bytes, (c) \texttt{anchors}: file names, line ranges, and function signatures modified by the patch, and (d) \texttt{patch\_signature\_hash}: a SHA1 hash of the first six non-trivial added lines, used for identity matching in the consistency gate.
+
+    \item \textbf{SuccessPathCard}: Also written on \texttt{resolved}. Records the sequence of key steps leading to the successful patch, without requiring verbatim content. Primarily used for planning-time guidance.
+
+    \item \textbf{BugAntiPatternCard}: Written on official evaluation failure (\texttt{unresolved}). Records the \texttt{patch\_signature\_hash} and function-level parameter signatures of the failed patch, enabling the consistency gate to detect if a future attempt is about to reproduce a known-bad fix.
+
+    \item \textbf{PlanHintCard, RetryHintCard}: Compiled by the CardCompiler from attempt summaries and failure cards; injected during planning phases.
+
+    \item \textbf{TimeoutGovernanceCard, ClosureGuardCard}: Generated by the step budget system when the agent exceeds exploration thresholds, enforcing convergence behavior.
+\end{itemize}
+
+All cards start in \texttt{CANDIDATE} state. After official evaluation, associated candidates are either promoted to \texttt{PROMOTED} (on \texttt{resolved}) or suppressed to \texttt{SUPPRESSED} (on \texttt{unresolved}). Only \texttt{PROMOTED} cards are retrieved and injected in future attempts.
+
+\subsection{Cross-Attempt Memory Lifecycle}
+
+The memory lifecycle spans three phases within a single attempt and one post-attempt phase:
+
+\textbf{Phase 1 -- Retrieval and Injection.} At each agent step, Tool A (the memory query tool, default timeout 45s) is invoked with the current step context, retrieving relevant cards from the GraphStore via embedding-based similarity search (using \texttt{all-MiniLM-L6-v2} sentence transformers). Retrieved cards are buffered in a priority queue and injected into the agent's prompt as a \texttt{[AgentMem Hints]} user message before the next LLM call. Cards are prioritized in buckets: \texttt{semantic} (BugInvariantCard, SuccessPathCard, BugAntiPatternCard) $>$ \texttt{closure} $>$ \texttt{repair} $>$ \texttt{validation} $>$ \texttt{general} $>$ \texttt{workflow}, with a total character budget of 2,400 characters per injection event.
+
+\textbf{Phase 2 -- Pre-Submission Gating.} When the agent generates a \texttt{submit} action, the patch consistency gate (Module C) is triggered. The gate computes a signature hash of the current patch and checks it against active BugAntiPatternCard hashes. On a match (in \texttt{enforce} mode), the action is rewritten to a \texttt{git diff} inspection command, giving the agent one additional step to self-correct before the gate allows the next submit through unconditionally.
+
+\textbf{Phase 3 -- Post-Attempt Experience Extraction.} After the agent run completes, the LLM Experience Extractor independently calls a designated extraction LLM to analyze the trajectory and generate structured \texttt{CriticalSignal} objects. These feed into the EvaluationFeedbackProcessor.
+
+\textbf{Phase 4 -- Evaluation-Driven Card Promotion/Suppression.} After official SWE-bench evaluation (executed in an isolated Docker container), the EvaluationFeedbackProcessor maps the binary \texttt{resolved}/\texttt{unresolved} outcome to card lifecycle transitions and writes the corresponding BugInvariantCard/BugAntiPatternCard.
+
+\subsection{Five Functional Modules}
+
+All five modules default to off and are independently activated via environment variables, enabling ablation experiments.
+
+\textbf{Module A -- Verbatim Diff Augmentation} (\texttt{AGENT\_MEM\_BUG\_INVARIANT\_VERBATIM=1}): Augments BugInvariantCard with \texttt{verbatim\_diff}, \texttt{anchors}, and \texttt{patch\_signature\_hash}. Without this module, the card contains only natural language description; Module A enables the VERBATIM\_REUSE strategy in Module D.
+
+\textbf{Module B -- Anti-Pattern Card} (\texttt{AGENT\_MEM\_BUG\_ANTI\_PATTERN=1}): Writes a BugAntiPatternCard on every \texttt{unresolved} outcome, recording the failed patch's signature. Without this module, Agent-mem has no mechanism to prevent the agent from reproducing a known-bad fix.
+
+\textbf{Module C -- Patch Consistency Gate} (\texttt{AGENT\_MEM\_PATCH\_CONSISTENCY\_GATE=enforce}): Intercepts \texttt{submit} actions and compares the current patch signature against known-failure signatures from Module B. Three modes: \texttt{off} (no intervention), \texttt{advise} (warning injected but submission allowed), \texttt{enforce} (submission rewritten to git diff inspection; next submit allowed unconditionally).
+
+\textbf{Module D -- ReuseExploreScheduler} (\texttt{AGENT\_MEM\_REUSE\_EXPLORE=auto}): Decides per-attempt which of three strategies to apply: \texttt{VERBATIM\_REUSE} (strict verbatim reuse of BugInvariantCard diff), \texttt{EXPLORE\_AROUND\_INVARIANT} (localized exploration around the invariant's anchors), or \texttt{explore\_fresh} (free exploration, only anti-patterns injected). Strategy probabilities are computed as:
+\begin{align}
+p_{\text{reuse}} = \begin{cases}
+0 & \text{if } n_{\text{resolved}} = 0 \\
+\min(0.5 + 0.2 \cdot n_{\text{resolved}},\ 0.9) & \text{if } n_{\text{failed}} = 0,\ n_{\text{resolved}} \geq 1 \\
+\text{clip}(0.6 + 0.1(n_{\text{resolved}} - n_{\text{failed}}),\ 0.4,\ 0.85) & \text{otherwise}
+\end{cases}
+\end{align}
+where $n_{\text{resolved}}$ and $n_{\text{failed}}$ are the counts of active BugInvariantCards and BugAntiPatternCards at decision time. A deterministic RNG seeded by \texttt{SHA1(instance\_id :: attempt\_id :: run\_id)} is used to convert $p_{\text{reuse}}$ to a strategy choice, ensuring reproducibility without coordination overhead. When \texttt{VERBATIM\_REUSE} is selected, the step-budget guardrail is tightened from 15 to 8 steps without a code edit, accelerating convergence.
+
+\textbf{Module E -- Local Effective Feedback} (\texttt{AGENT\_MEM\_LOCAL\_EFFECTIVE\_FEEDBACK=1}): Tracks per-card success/error event ratios during the intervention window (5 steps) following each injection event, and issues confidence adjustment requests (\texttt{v2\_card\_feedback\_request}) consumed by \texttt{GraphStore.adjust\_card()} to incrementally update card confidence based on within-attempt evidence.
+
+\subsection{Hint Injection Format}
+
+Memory hints are injected as a user-role message appended to the agent's conversation history immediately before each LLM call:
+
+\begin{verbatim}
+[AgentMem Hints]
+Treat matching hints as high-priority guidance for this attempt.
+Avoid over-exploration: reuse validated repro/fix paths first, and
+once a minimal plausible patch exists, validate it before broadening.
+1. <hint text, up to 280 chars>
+2. <hint text>
+...
+\end{verbatim}
+
+Hints are selected by a priority-ordered bucket algorithm that respects a 2,400-character total budget, a family cooldown of 4 steps (preventing repetitive injection from the same card family), and a per-family cap of one injection per attempt for non-semantic card types.
+
+\subsection{Watchdog: Time-Fair Comparison}
+
+A critical confound in evaluating memory-augmented agents is that memory server calls consume wall-clock time, reducing the agent's effective thinking time relative to a no-memory baseline. Agent-mem introduces a \textbf{Watchdog timer} that enforces equal \emph{net agent time} across conditions:
+
+\begin{equation}
+t_{\text{agent}} = t_{\text{wall}} - \sum_i t_{\text{bridge},i}
+\end{equation}
+
+where $t_{\text{bridge},i}$ is the duration of the $i$-th memory server call, logged to a shared overhead file by the BridgeHook and polled by the Watchdog each second. When $t_{\text{agent}} \geq T_{\text{budget}}$ (1,200 s in our experiments), the Watchdog kills the entire agent process group via \texttt{os.killpg()}, using \texttt{start\_new\_session=True} to ensure all descendent processes including Docker exec invocations are terminated. The exit code 124 corresponds to \texttt{exit\_status=None} in the agent trajectory. Without this mechanism, the \texttt{with\_mem} condition would systematically receive less thinking time than \texttt{nomem}, biasing comparisons.
+
+%=====================================================
+\section{Experiments and Results}
+%=====================================================
+
+\subsection{Benchmark and Instance Selection}
+
+Experiments are conducted on \textbf{SWE-bench Full} (2,294 instances, \texttt{subset=full, split=test}), using the official evaluation harness (\texttt{swebench.harness.run\_evaluation}) with per-instance Docker containers. We use the full dataset rather than SWE-bench Lite (300 instances) or SWE-bench Verified (500 instances), because the Lite subset carries risks of overfitting from community exposure, and Verified preferentially selects human-confirmed-solvable instances that do not represent the natural difficulty distribution.
+
+For the core controlled experiment (F3), we select nine diagnostic instances from three Python open-source projects, listed in Table~\ref{tab:instances}. This is not a random sample of SWE-bench Full. Instances were chosen to satisfy three criteria: (1) not previously used in framework development stages, to avoid memory pre-contamination; (2) spanning three distinct codebases, to test cross-project behavior; and (3) covering a range of estimated difficulties, to make heterogeneous memory effects observable under a limited API budget. The resulting analysis should therefore be interpreted as a controlled diagnostic study rather than a population-level estimate over all SWE-bench instances.
+
+\begin{table}[h]
+\centering
+\caption{F3 experiment instances (SWE-bench Full, \texttt{split=test}).}
+\label{tab:instances}
+\begin{tabular}{llc}
+\toprule
+\textbf{Instance ID} & \textbf{Project} & \textbf{nomem Solve Rate} \\
+\midrule
+\texttt{django\_\_django-12284} & Django & 10/10 (100\%) \\
+\texttt{django\_\_django-16139} & Django & 6/10 (60\%) \\
+\texttt{django\_\_django-12497} & Django & 6/10 (60\%) \\
+\texttt{sympy\_\_sympy-24066} & SymPy & 10/10 (100\%) \\
+\texttt{sympy\_\_sympy-13031} & SymPy & 0/10 (0\%) \\
+\texttt{sympy\_\_sympy-13551} & SymPy & 10/10 (100\%) \\
+\texttt{astropy\_\_astropy-12907} & Astropy & 10/10 (100\%) \\
+\texttt{astropy\_\_astropy-14995} & Astropy & 10/10 (100\%) \\
+\texttt{astropy\_\_astropy-13033} & Astropy & 0/10 (0\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Controlled Comparison Design}
+
+The F3 experiment follows a \textbf{paired controlled design}. For each of the 9 instances, we run two groups: (1) \textbf{nomem}: standard SWE-agent with no memory injection, every attempt independent; and (2) \textbf{with\_mem}: Agent-mem enabled with all five v2 modules active. Each group executes 10 independent attempts per instance, yielding $9 \times 10 \times 2 = 180$ total attempts.
+
+Both groups use identical model configuration, prompt template (\texttt{prompt\_base}), tool set, Docker environment, and SWE-bench partition. The Watchdog enforces a net agent time budget of 1,200 seconds for both groups. Concurrency is controlled by resource slot locks: a maximum of one heavy nomem slot and one heavy with\_mem slot run simultaneously, preventing resource contention.
+
+The experiment supports checkpoint-resume (\texttt{RESUME\_MODE=1, REDO\_EXISTING=0}): each completed attempt writes a result file, and restarts skip completed attempts. This design was exercised several times in practice due to Docker Desktop interruptions.
+
+\subsection{Language Model and Configuration}
+
+The agent model is \textbf{Kimi} (\texttt{kimi-latest}, Moonshot AI API, \texttt{https://api.moonshot.cn/v1}), configured with function-calling response parsing and default temperature. The memory card extraction LLM is \textbf{Kimi K2.5} (\texttt{kimi-k2.5}), running independently of the agent model via the \texttt{LLMExperienceExtractor.from\_env()} configuration path.
+
+The Agent-mem v2 module configuration in force during F3 is:
+\begin{verbatim}
+AGENT_MEM_BUG_INVARIANT_VERBATIM=1    (Module A)
+AGENT_MEM_BUG_ANTI_PATTERN=1          (Module B)
+AGENT_MEM_PATCH_CONSISTENCY_GATE=enforce (Module C)
+AGENT_MEM_REUSE_EXPLORE=auto          (Module D)
+AGENT_MEM_FORCE_STRATEGY=auto         (Module D)
+AGENT_MEM_LOCAL_EFFECTIVE_FEEDBACK=1  (Module E)
+AGENT_MEM_L3_FORCE_SUBMIT=dry_run     (Module E)
+\end{verbatim}
+
+Note that Module E's L3 force-submit is set to \texttt{dry\_run}, meaning that when the step hard-stop (50 steps without a patch) is reached, Agent-mem records the event but does not rewrite the agent's action. This conservative choice was made to avoid unintended interference; the full \texttt{enforce} mode is left for future ablation.
+
+\subsection{Overall Resolution Rates}
+
+Table~\ref{tab:overall} presents the overall resolved attempt counts and rates with 95\% Wilson confidence intervals.
+
+\begin{table}[h]
+\centering
+\caption{Overall resolution rates, F3 experiment (Kimi, SWE-bench Full).}
+\label{tab:overall}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Condition} & \textbf{Resolved} & \textbf{Total} & \textbf{Rate} & \textbf{95\% CI} \\
+\midrule
+\texttt{nomem} & 62 & 90 & 68.9\% & [58.7\%, 77.5\%] \\
+\texttt{with\_mem} & 63 & 90 & 70.0\% & [59.9\%, 78.5\%] \\
+\midrule
+\multicolumn{3}{l}{Difference (\texttt{with\_mem} $-$ \texttt{nomem})} & $+$1.1 pp & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The overall difference of $+$1.1 pp is not statistically significant; the 95\% confidence intervals overlap substantially. This finding---that the aggregate effect is near zero---is the first indication that summarizing by a global average conceals strongly heterogeneous sub-effects, motivating the zone-based analysis in Section~\ref{sec:zone}.
+
+Table~\ref{tab:per_instance} provides per-instance results with token statistics.
+
+\begin{table}[h]
+\centering
+\caption{Per-instance resolution rates and mean input tokens (tokens\_sent). $\Delta$ denotes \texttt{with\_mem} minus \texttt{nomem}. Token $\Delta\%$ is relative change.}
+\label{tab:per_instance}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Instance} & \textbf{nomem} & \textbf{with\_mem} & \textbf{$\Delta$ (pp)} & \textbf{nomem tokens} & \textbf{wm tokens} & \textbf{Tok $\Delta$\%} \\
+\midrule
+django-12284 & 10/10 & 9/10 & $-1$ & 1,103,008 & 861,839 & $-21.9\%$ \\
+django-16139 & 6/10 & 9/10 & $+3$ & 913,083 & 316,672 & $-65.3\%$ \\
+django-12497 & 6/10 & 7/10 & $+1$ & 476,257 & 450,360 & $-5.4\%$ \\
+sympy-24066 & 10/10 & 8/10 & $-2$ & 961,116 & 530,888 & $-44.8\%$ \\
+sympy-13031 & 0/10 & 6/10 & $\mathbf{+6}$ & 1,478,376 & 1,041,481 & $-29.6\%$ \\
+sympy-13551 & 10/10 & 5/10 & $\mathbf{-5}$ & 832,212 & 1,983,016 & $+138.3\%$ \\
+astropy-12907 & 10/10 & 9/10 & $-1$ & 435,870 & 622,521 & $+42.8\%$ \\
+astropy-14995 & 10/10 & 10/10 & $0$ & 361,926 & 278,263 & $-23.1\%$ \\
+astropy-13033 & 0/10 & 0/10 & $0$ & 531,072 & 522,514 & $-1.6\%$ \\
+\midrule
+\textbf{Aggregate} & 62/90 & 63/90 & $+1$ & 791,563 & 736,457 & $-7.0\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Exploratory Zone-Based Analysis}
+\label{sec:zone}
+
+Inspection of Table~\ref{tab:per_instance} suggests that the sign and magnitude of Agent-mem's effect may track the nomem solve rate of each instance. To make this heterogeneity explicit, we partition the nine instances into three post-hoc \emph{nomem solve rate groups} and compute aggregate results within each group (Table~\ref{tab:zone}). These groups are defined using the same data being analyzed; therefore, this section should be read as exploratory hypothesis generation rather than independent validation of a theory.
+
+\begin{table}[h]
+\centering
+\caption{Exploratory zone-based analysis. Groups are defined post hoc by nomem solve rate across 10 attempts and should not be interpreted as independently validated categories.}
+\label{tab:zone}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Zone} & \textbf{Instances} & \textbf{Attempts} & \textbf{nomem} & \textbf{with\_mem} & \textbf{$\Delta$} \\
+\midrule
+0\% (zero zone) & 2 & 20 & 0\% & 30\% & $+$30 pp \\
+\quad\textit{of which: sympy-13031} & 1 & 10 & 0\% & 60\% & $+$60 pp \\
+\quad\textit{of which: astropy-13033} & 1 & 10 & 0\% & 0\% & 0 pp \\
+\midrule
+20--70\% (intermediate) & 2 & 20 & 60\% & 80\% & $\mathbf{+}$\textbf{20 pp} \\
+\midrule
+100\% (ceiling) & 5 & 50 & 100\% & 82\% & $\mathbf{-}$\textbf{18 pp} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Zero group} ($n_{\text{nomem}}=0$): The zero group exhibits divergent behavior between the two instances. \texttt{sympy-13031} shows a strong single-case capability-unlock signal: a bug that the agent does not resolve in 10 nomem attempts is resolved in 6 of 10 memory-augmented attempts. We analyze this case in Section~\ref{sec:unlock}, while noting that the result may still reflect stochastic variation around the agent's capability boundary. In contrast, \texttt{astropy-13033} shows no benefit in either condition (0/10 both). The zero group aggregate (0\% $\to$ 30\%) is therefore driven entirely by the \texttt{sympy-13031} case.
+
+\textbf{Intermediate group} (20--70\% nomem): Both Django instances improve under memory augmentation: \texttt{django-16139} improves from 6/10 to 9/10 ($+$30 pp), and \texttt{django-12497} from 6/10 to 7/10 ($+$10 pp). The group aggregate is 60\% $\to$ 80\% ($+$20 pp). Because this group contains only two instances, we treat it as suggestive evidence that memory is most useful when the base agent is neither failing completely nor already solving reliably.
+
+\textbf{Ceiling group} (100\% nomem): The five ceiling-group instances are heterogeneous. Four degrade under memory augmentation, while \texttt{astropy-14995} shows no degradation (10/10 in both conditions). The most severe case is \texttt{sympy-13551} (10/10 $\to$ 5/10, $-$50 pp, $+$138.3\% tokens), where memory appears to lead the agent into a longer, less reliable trajectory. The group aggregate is negative, but the per-instance variation cautions against treating the ceiling effect as uniform.
+
+\subsection{Token Efficiency}
+\label{sec:tokens}
+
+We report mean input token consumption (\texttt{tokens\_sent} from \texttt{model\_stats}) per attempt across conditions, providing a measure of agent efficiency. Table~\ref{tab:tokens} summarizes zone-level token statistics.
+
+\begin{table}[h]
+\centering
+\caption{Mean input tokens per attempt by zone.}
+\label{tab:tokens}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Zone} & \textbf{nomem mean} & \textbf{with\_mem mean} & \textbf{$\Delta$\%} & \textbf{Interpretation} \\
+\midrule
+Intermediate (20--70\%) & 694,670 & 383,516 & $-44.8\%$ & Memory shortens exploration \\
+Ceiling (100\%) & 745,967 & 861,926 & $+15.5\%$ & Memory adds unhelpful detours \\
+Zero + sympy-13031 & 1,478,376 & 1,041,481 & $-29.6\%$ & Memory reduces failed search \\
+\midrule
+Overall (90 attempts each) & 791,563 & 736,457 & $-7.0\%$ & Modest aggregate saving \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The intermediate zone exhibits the strongest token efficiency gain ($-44.8\%$). This is consistent with the mechanistic interpretation that BugInvariantCard injection shortens the localization and repair phases by directing the agent to the correct file and function in early steps. When without memory the agent spends 30--40 steps on broad repository exploration before locating the relevant code, while with memory it can proceed directly to the repair step. The large token reduction for \texttt{django-16139} alone ($-65.3\%$) supports this interpretation.
+
+The ceiling zone token increase ($+15.5\%$) reflects a different dynamic: memory cards direct the agent toward a particular fix pattern, but when the agent independently converges on a different (also correct) fix, the memory guidance creates conflicting objectives that extend the trajectory before the agent resolves the tension. The extreme case of \texttt{sympy-13551} ($+138.3\%$) is the clearest illustration.
+
+\subsection{Submission Behavior Analysis}
+
+Table~\ref{tab:exit} presents the distribution of exit statuses observed in agent trajectories.
+
+\begin{table}[h]
+\centering
+\caption{Exit status distribution across 91 nomem and 89 with\_mem trajectory files.}
+\label{tab:exit}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Exit Status} & \textbf{nomem $n$} & \textbf{nomem \%} & \textbf{with\_mem $n$} & \textbf{with\_mem \%} \\
+\midrule
+\texttt{submitted} & 80 & 87.9\% & 80 & 89.9\% \\
+\texttt{None} (Watchdog kill) & 9 & 9.9\% & 8 & 9.0\% \\
+\texttt{submitted (exit\_error)} & 2 & 2.2\% & 0 & 0\% \\
+\texttt{exit\_error} & 0 & 0\% & 1 & 1.1\% \\
+\midrule
+Total & 91 & & 89 & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Watchdog trigger rate is nearly identical between conditions (9.9\% vs. 9.0\%), confirming that the time-fairness mechanism functions as intended and that the \texttt{with\_mem} condition is not disproportionately spending time on memory overhead. The \texttt{submitted} rate is slightly higher in the \texttt{with\_mem} condition (89.9\% vs. 87.9\%), suggesting that memory guidance marginally improves the agent's ability to reach a submission state within the budget.
+
+%=====================================================
+\subsection{Lightweight Multi-Agent Auxiliary Study}
+\label{sec:multiagent}
+%=====================================================
+
+The main Agent-mem experiment evaluates whether structured cross-attempt memory improves repeated code-repair attempts. We additionally study whether lightweight auxiliary agents can improve the \emph{use} of that memory without replacing the underlying SWE-agent executor or changing the Docker evaluation environment. This section reports a targeted auxiliary study rather than a full benchmark-scale evaluation. Its purpose is to characterize coverage gains and failure boundaries of multi-agent scaffolding over Agent-mem.
+
+\subsubsection{Design Motivation}
+
+Agent-mem stores and retrieves structured experience, but the retrieved cards are still injected as textual guidance. This leaves three unresolved questions:
+
+\begin{enumerate}
+    \item Can memory hints be reformulated according to the current execution phase, so that exploration receives localization guidance while repair and pre-submission receive more concrete invariant checks?
+    \item Can intermediate progress discovered inside an attempt be written early enough to support later attempts?
+    \item Can a pre-submit critic detect when a candidate patch conflicts with historical success invariants or repeats known failure signatures?
+\end{enumerate}
+
+We implement three Tier-1 auxiliary modules:
+
+\begin{itemize}
+    \item \textbf{T1-A: Memory Reformulation Agent.} Rewrites retrieved memory hints according to the inferred execution phase (\texttt{explore}, \texttt{localized}, \texttt{fixing}, or \texttt{pre\_submit}). Its goal is to reduce phase-mismatch: for example, exploration should emphasize files and functions rather than full patch diffs.
+
+    \item \textbf{T1-B: Async Interim Memory Mining.} Writes lightweight interim localization or progress cards during an attempt when localization patterns, first edits, or test-pass signals are observed. This module was implemented and unit-tested but was not included in the main auxiliary experiment, because it introduces a separate cross-attempt live-memory mechanism that would confound attribution.
+
+    \item \textbf{T1-C: Pre-Submit Critic Agent.} Reads the patch diff, issue context, BugInvariantCard, BugAntiPatternCard, and test output before submission, returning \texttt{approve}, \texttt{revise}, or \texttt{reject}. In principle, \texttt{revise} injects a \texttt{[Critic Review]} hint and \texttt{reject} blocks repeated failure modes.
+\end{itemize}
+
+All modules are independently controlled by environment variables and default to off. The auxiliary experiments focus on T1-A + T1-C, because this combination directly targets the two most plausible limitations of Agent-mem: phase-insensitive hint injection and insufficient pre-submit semantic checking.
+
+\subsubsection{Targeted Experimental Protocol}
+
+The multi-agent study uses a targeted aligned subset rather than the full F3 set. This choice is deliberate: repeated-attempt SWE-bench experiments are expensive, and the purpose here is mechanism analysis rather than a new headline benchmark. We select four historical instances for which phase9-v2 control data exists and where memory behavior is informative. Each instance is run for 10 attempts under the T1-A + T1-C configuration, yielding 40 attempts.
+
+The primary metric is \texttt{resolved@k}: whether an instance is resolved at least once within the first $k$ attempts. This is the natural metric for cross-attempt memory. The framework is not designed to force success on the first attempt; rather, it is designed to accumulate and reuse experience once informative outcomes have occurred. Consequently, the absence of a uniform early-success improvement is not itself a failure. What matters is whether the system increases repeated-attempt coverage and whether successful experience can be reused reliably after it is observed.
+
+\subsubsection{Main Multi-Agent Results}
+
+Table~\ref{tab:multiagent_overall} summarizes the aligned-set comparison between phase9-v2 control and T1-A + T1-C.
+
+\begin{table}[h]
+\centering
+\caption{Targeted multi-agent auxiliary experiment on a four-instance aligned subset. The comparison uses historical phase9-v2 control data and a T1-A + T1-C treatment run.}
+\label{tab:multiagent_overall}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{phase9-v2 control} & \textbf{T1-A + T1-C} \\
+\midrule
+\texttt{resolved@1} & 25.0\% & 50.0\% \\
+\texttt{resolved@3} & 75.0\% & 75.0\% \\
+\texttt{resolved@5} & 75.0\% & 75.0\% \\
+\texttt{resolved@10} & 75.0\% & 100.0\% \\
+Avg. first resolved attempt & 1.7 & 3.2 \\
+Post-success consistency & 52.0\% & 48.1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The main positive signal is coverage: \texttt{resolved@10} improves from 75.0\% to 100.0\% on the aligned subset. This indicates that lightweight multi-agent scaffolding can act as a \emph{coverage amplifier}: across repeated attempts, it increases the probability that at least one attempt reaches a valid patch. However, the improvement does not uniformly translate into earlier resolution or stronger post-success consistency. The average first resolved attempt becomes later (1.7 to 3.2), and post-success consistency slightly decreases (52.0\% to 48.1\%). We therefore avoid interpreting this auxiliary study as evidence of a mature consistency-improving module.
+
+Table~\ref{tab:multiagent_instance} shows the per-instance treatment results and mechanism signals.
+
+\begin{table}[h]
+\centering
+\caption{Per-instance T1-A + T1-C results and mechanism signals.}
+\label{tab:multiagent_instance}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Instance} & \textbf{Resolved} & \textbf{T1-A events} & \textbf{T1-C verdicts} & \textbf{Interpretation} \\
+\midrule
+\texttt{astropy\_\_astropy-12057} & 5/10 & 60 & 0 & approximately neutral \\
+\texttt{sympy\_\_sympy-13551} & 4/10 & 49 & 0 & interference on easy case \\
+\texttt{sympy\_\_sympy-13031} & 1/10 & 67 & 0 & strongest negative transfer \\
+\texttt{django\_\_django-11278} & 7/10 & 75 & 0 & strongest positive signal \\
+\midrule
+\textbf{Total} & 17/40 & 251 & 0 & T1-A active; T1-C inactive \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The mechanism table is crucial. T1-A fires 251 times across 40 attempts, showing that memory reformulation is active. T1-C, however, produces zero verdicts. Subsequent log review showed that this is not a statistics bug: ordinary \texttt{submit} actions did not contain inline patch diffs, so the critic often had no \texttt{patch\_text} to inspect and silently fell back to allowing the submission. Thus the main multi-agent run supports T1-A activity and coverage improvement, but it does not support a claim that T1-C semantically corrected patches.
+
+\subsubsection{Follow-Up Validation Summary}
+
+Because T1-C produced zero verdicts in the main auxiliary run, we performed small follow-up validations on the most informative positive and negative cases. These runs are not large enough to support an independent performance claim, so we report only the mechanism-level conclusion here and provide the detailed counts in Appendix~\ref{app:multiagent_followup}. After engineering fixes, T1-C became observable, but its decisions were dominated by \texttt{approve} or \texttt{unavailable} rather than stable \texttt{revise}/\texttt{reject} corrections. The follow-up runs also showed that \texttt{sympy\_\_sympy-13031} is dominated by exploration non-convergence and incomplete attempts. This is a structural mismatch for a pre-submit critic: the critic can assess a candidate patch only after such a patch exists, but the dominant failure mode is often the absence of a candidate patch.
+
+\subsubsection{Interpretation}
+
+The multi-agent extension provides a useful but bounded result. It improves repeated-attempt coverage on the targeted aligned subset and produces a strong Django positive case. At the same time, the follow-up experiments show that the mechanism is not yet stable enough to claim per-attempt reliability improvement. This is consistent with the broader Agent-mem thesis: cross-attempt memory primarily helps after experience has been accumulated. It is not expected to make the first attempt immediately successful. The relevant question is whether accumulated evidence is preserved, retrieved, and reused effectively across later attempts.
+
+Under this criterion, the current multi-agent system remains preliminary. T1-A is active and may help in the Django case, but its causal role requires offline trace analysis. T1-C improves observability after engineering fixes, but without executable feedback it tends toward \texttt{approve} or \texttt{unavailable}. The most rigorous conclusion is therefore:
+
+\begin{quote}
+Lightweight multi-agent scaffolding over Agent-mem can amplify repeated-attempt coverage, but current pre-submit critic and reformulation mechanisms expose important boundary conditions. Reliable improvement likely requires exploration-phase closure control and executable or deterministic critic gates, rather than additional LLM-only critique at submission time.
+\end{quote}
+
+%=====================================================
+\section{Discussion}
+%=====================================================
+
+\subsection{Interpreting the Exploratory Zone Pattern}
+
+The zone-based results in Table~\ref{tab:zone} should be interpreted as an exploratory pattern, not as an independently validated theory. The groups are defined from the same nomem outcomes used in the analysis, and the experiment contains only two intermediate instances, two zero-resolution instances, and five ceiling instances. This design is useful for diagnosis, but it does not establish a population-level law over SWE-bench.
+
+Within that limitation, the pattern is consistent with a simple competence-information interpretation. In the intermediate group, the agent sometimes solves the bug without memory, suggesting that it has the required repair capability but suffers from trajectory variance. Structured memory may reduce this variance by pointing to relevant anchors, successful edits, or known-bad alternatives. In the ceiling group, by contrast, the agent already solves every nomem attempt; additional memory can become a competing signal rather than useful guidance. The severe \texttt{sympy\_\_sympy-13551} degradation illustrates this risk, while \texttt{astropy\_\_astropy-14995} shows that ceiling cases are not uniformly harmed.
+
+The practical implication is therefore conditional rather than universal: cross-attempt memory should not be enabled blindly. A deployable system would need an instance-level or early-trajectory estimator that decides whether memory is likely to help, remain neutral, or interfere.
+
+\subsection{Why Early Success Is Not the Primary Objective}
+
+It is important not to evaluate cross-attempt memory solely by early-attempt metrics such as \texttt{resolved@1}. Agent-mem is not intended to make the first attempt immediately better in all cases. The core mechanism is temporal: once an attempt succeeds or fails informatively, the system converts that outcome into structured experience that later attempts can retrieve, validate, and reuse. Therefore, \texttt{resolved@k} for larger $k$, post-success reuse behavior, and token efficiency after memory accumulation are more faithful measures of the intended effect.
+
+This also explains the multi-agent auxiliary result. The T1-A + T1-C extension improves aligned-set \texttt{resolved@10} but does not uniformly improve early success. Before informative memory exists, the auxiliary agents have limited reliable signal to exploit. The more important question is whether the framework preserves useful experience once it appears. In the present implementation, this is only partially achieved: the main Agent-mem experiment shows suggestive repeated-attempt effects, while the multi-agent extension improves coverage but not post-success consistency. This distinction matters for interpretation: lack of early-success improvement is acceptable for a cross-attempt memory framework; lack of stable reuse after success remains an open engineering problem.
+
+\subsection{Capability Unlock in the Zero-Resolution Zone}
+\label{sec:unlock}
+
+The \texttt{sympy-13031} result (0\%$\to$60\%) is the strongest single-instance positive signal in the study. Without memory, the agent does not resolve this bug in 10 attempts; with memory augmentation, 6 of 10 attempts succeed. This is consistent with the hypothesis that accumulated failure-side evidence helps the agent avoid previously explored wrong directions.
+
+However, this result should not be over-interpreted as a general capability law. It is one instance with 10 attempts per condition, and stochastic variation near the model's capability boundary remains a plausible alternative explanation. The mechanism claim is therefore modest: the observed trajectories suggest that BugAntiPatternCards may have helped direct later attempts away from repeated failure signatures, but larger matched samples would be required to establish the effect as systematic.
+
+The contrast with \texttt{astropy-13033} (0\%$\to$0\%) is equally important. Memory does not unlock every zero-resolution instance. Some bugs may be reachable with accumulated guidance; others may remain outside the agent's repair capability under the current interface, model, or time budget.
+
+\subsection{Memory Interference and Ceiling Degradation}
+
+The \texttt{sympy-13551} case ($-50$ pp, $+138\%$ tokens) is the most severe failure mode in the experiment and warrants detailed discussion. This instance has nomem solve rate 100\%: every unguided attempt succeeds independently. Under memory augmentation, only 5 of 10 attempts succeed.
+
+Token analysis reveals the mechanism: with\_mem attempts on \texttt{sympy-13551} consume on average 1,983,016 input tokens, compared to 832,212 for nomem---a 138\% increase. This suggests that the agent is executing substantially longer trajectories, exploring more before arriving at a resolution (or failing within budget). The memory cards, derived from the earliest successful attempts, encode a specific repair strategy. When later attempts draw on these cards via VERBATIM\_REUSE or EXPLORE\_AROUND\_INVARIANT strategy, they are anchored to this encoded strategy. If subsequent attempts encounter slight environmental variations (e.g., a test that passes with a structurally different but equivalent patch), the memory anchor may cause the agent to reject valid solutions in favor of the memorized approach, which no longer applies cleanly.
+
+This suggests a critical limitation of the current framework: the governance lifecycle promotes cards on the first few \texttt{resolved} outcomes, but does not account for whether the promoted cards remain maximally informative as the attempt index increases. A memory freshness mechanism---reducing the weight of early-promoted cards in favor of more recent outcomes---could mitigate this.
+
+\subsection{Implications of the Multi-Agent Auxiliary Study}
+
+The multi-agent study in Section~\ref{sec:multiagent} clarifies where lightweight auxiliary agents are useful and where they are structurally mismatched to the failure mode. T1-A appears plausible as a hint-shaping mechanism: it can reduce the burden on the main agent by rewriting retrieved cards into phase-appropriate guidance. The Django positive case suggests that such reformulation can be beneficial when the task requires reliable reuse of framework-specific localization and repair cues. However, T1-A may also distort high-value raw details, especially in instances where the original BugAntiPatternCard or BugInvariantCard contains precise tokens that should not be paraphrased away.
+
+T1-C exposes a different limitation. LLM-based critics are attractive because they can inspect semantic patch content, but without executable feedback their decisions are weakly grounded. Our follow-up experiments show that once the critic is made observable, it tends to approve or become unavailable rather than produce stable corrective decisions. This aligns with the broader limitation of self-refinement methods: verbal feedback is useful when the evaluation rubric is explicit, but code repair ultimately depends on repository-level test execution. A critic that can see a diff but cannot execute it is positioned to detect obvious mismatches, not to certify repair correctness.
+
+The most important boundary finding is the SymPy failure mode. \texttt{sympy\_\_sympy-13031} is dominated by exploration non-convergence and incomplete attempts. A pre-submit critic intervenes after a patch candidate exists, so it cannot solve the primary failure mode of never reaching a patch candidate. Effective intervention for such cases must happen earlier, during exploration and localization, through closure control, exploit forcing, or structured reuse of failure-side evidence.
+
+\subsection{Threats to Validity and Future Work}
+
+\textbf{Sample size.} With $n=10$ attempts per instance and 9 diagnostic instances, per-instance confidence intervals are wide (typical width 50--60 pp). The grouped findings in Table~\ref{tab:zone} aggregate 20 or 50 attempts, but the groups contain few distinct instances. The results should therefore be read as evidence for hypotheses and failure modes, not as precise estimates of SWE-bench-wide performance.
+
+\textbf{Instance selection and post-hoc grouping.} The F3 instances were selected diagnostically to span difficulty regimes for Kimi, not sampled randomly from SWE-bench Full. In addition, the zero, intermediate, and ceiling groups are defined using the same nomem outcomes used in the analysis. This creates a risk of confirmation bias and circular interpretation. A stronger validation would first define the grouping rule on a pilot set and then test it on an independent random or stratified sample.
+
+\textbf{Single model.} All reported controlled results use Kimi (kimi-latest). A preliminary DeepSeek V4 Pro experiment was conducted, but DeepSeek achieves near-100\% nomem solve rates on the F3 instances, placing nearly all selected instances in a ceiling-like regime. This shows that the diagnostic set is partly model-calibrated. Cross-model validation requires either a larger instance pool or model-specific stratified sampling.
+
+\textbf{Module ablation.} The F3 experiment enables all five modules simultaneously. This prevents strong attribution to any individual module. The strongest next ablation is not a full factorial design, which would be expensive, but a minimal comparison between core memory cards (Modules A+B), core cards plus gate (A+B+C), and the full system (A+B+C+D+E).
+
+\textbf{Efficiency metrics.} We report input tokens because they are consistently available in the trajectory statistics. This is only a partial efficiency measure. A more complete cost analysis should include output tokens, end-to-end wall-clock time, memory-server overhead, and a Pareto view of resolution rate versus total token cost.
+
+\textbf{Ceiling mitigation.} The exploratory zone pattern implies that Agent-mem should be activated selectively, especially when the base agent is already reliable. A practical deployment would require an upfront or early-trajectory difficulty estimator before activating memory injection. Designing such an estimator is an open problem.
+
+\textbf{Multi-agent sample size and attribution.} The multi-agent extension is evaluated as a targeted auxiliary study rather than a benchmark-scale experiment. Its 4-instance aligned set and subsequent 2-case/1-case validation runs are sufficient for mechanism exploration, but not for a standalone performance claim. In particular, the Django positive case and SymPy negative case should be interpreted symmetrically: together they show the promise and boundary of lightweight scaffolding, not an unconditional improvement.
+
+\textbf{Offline trace analysis.} The most immediate next experiment is zero-cost and does not require additional API calls. Existing trajectories can be analyzed to compare T1-A reformulations in resolved and unresolved attempts. For Django, the analysis should ask whether reformulated hints are followed by earlier transitions from broad exploration to localization or editing. For SymPy, it should compare raw phase9-v2 memory hints against T1-A-rewritten hints to test whether reformulation removes anti-pattern keywords or exact anchors that were useful in the original memory framework. The expected output is not a causal proof, but supporting evidence for whether T1-A acts as useful phase adaptation or harmful paraphrase.
+
+\textbf{\texttt{resolved@k} curve analysis.} A second low-cost analysis is to plot \texttt{resolved@k} for $k \in \{1,3,5,7,10\}$ across nomem, Agent-mem, and the multi-agent extension where aligned data exist. This representation is better suited to cross-attempt systems than a single \texttt{resolved@1} number. It would make explicit whether a method improves early success, late coverage, or both. For the current multi-agent extension, we expect the honest interpretation to be late coverage amplification rather than consistent early convergence.
+
+\textbf{Executable or deterministic critics.} The T1-C results suggest that LLM-only critique is insufficient for code repair unless grounded in executable evidence. A future critic should either (i) run a small deterministic pre-submit validation suite, (ii) use rule-based checks over patch signatures, function anchors, and known anti-pattern hashes, or (iii) combine LLM reasoning with a hard validator that can reject non-executable or known-bad patches. This future work should be treated as a new experiment, not as an explanation of the current T1-C result.
+
+\textbf{Exploration-phase closure control.} The SymPy boundary case shows that incomplete-dominated failures require intervention before submission. A concrete future direction is a closure controller that detects repeated exploration without edits, repeated reproduction without patch formation, or repeated identical precheck diffs. The controller should then force one of three actions: exploit a known invariant, inspect the current diff and submit a minimal patch, or explicitly switch to a different file/function candidate. Metrics should include incomplete rate, first edit step, first patch step, and \texttt{resolved@k}.
+
+\textbf{T1-B and live memory.} T1-B remains a plausible extension for parallel or near-parallel attempts, where interim localization information can reduce duplicate exploration. We do not include it in the current paper's main auxiliary result because it would confound attribution, but future work should evaluate it in a setting where multiple attempts run concurrently and can benefit from live interim cards.
+
+\textbf{Conditional activation.} The exploratory zone pattern and the multi-agent negative cases both imply that memory and auxiliary agents should not be activated uniformly. A practical system should estimate whether an instance is likely to benefit from memory before choosing an intervention policy. Lightweight predictors could use early trajectory signals such as number of located files, test reproduction success, first-edit step, and patch formation latency. This would allow the system to enable memory strongly when the base agent appears uncertain, emphasize anti-pattern guidance in repeated-failure cases, and suppress memory when the base agent is already reliable.
+
+%=====================================================
+\section{Conclusion}
+%=====================================================
+
+We have presented Agent-mem, a training-free cross-attempt experience memory framework for LLM-based code repair agents, and reported a controlled diagnostic evaluation across 180 attempts on nine SWE-bench Full instances. The aggregate improvement is small (+1.1 pp), but the per-instance results reveal a heterogeneous pattern: memory is beneficial on the two intermediate-difficulty instances, harmful on several ceiling instances, and mixed on zero-resolution instances. Because the groups are post hoc and the sample is small, we treat this as an exploratory empirical pattern rather than a validated theory.
+
+These findings have practical implications for agent deployment. Applying memory unconditionally can obscure localized benefits and may degrade performance when the base agent is already capable. Conditional activation based on instance-level or early-trajectory difficulty estimation, combined with ceiling-effect mitigation mechanisms such as memory freshness and confidence decay, are important open research directions.
+
+The auxiliary multi-agent study reinforces this cautious conclusion. Lightweight agentic scaffolding can improve repeated-attempt coverage on a targeted aligned subset, but it also shows that more agents do not automatically produce more reliable repair. T1-A reformulation may help when phase-appropriate reuse is needed, while T1-C shows that pre-submit verbal critics without executable grounding are insufficient for exploration-dominated failures. Thus, the path forward is not simply to add more critic calls, but to design conditional memory activation, exploration-phase closure control, and executable or deterministic validation mechanisms.
+
+Beyond the empirical findings, Agent-mem's design---non-invasive hook integration, semantically-typed cards with governance lifecycles, modular independently-activatable components, and time-fair experimental control---provides a reusable framework for studying cross-attempt learning in code repair contexts.
+
+%=====================================================
+\appendix
+\section{Auxiliary Multi-Agent Follow-Up Details}
+\label{app:multiagent_followup}
+%=====================================================
+
+Table~\ref{tab:multiagent_followup_appendix} reports the small follow-up validations used to inspect the T1-C critic and closure-control behavior. These runs are included for transparency and mechanism diagnosis only; they are not used as benchmark-scale evidence.
+
+\begin{table}[h]
+\centering
+\caption{Follow-up validation details for the lightweight multi-agent extension.}
+\label{tab:multiagent_followup_appendix}
+\begin{tabular}{llll}
+\toprule
+\textbf{Run} & \textbf{Scope} & \textbf{Attempts} & \textbf{Outcome} \\
+\midrule
+Stage2-01 & SymPy + Django & 20 & \texttt{resolved@10}=100\% \\
+Stage2-01 SymPy & \texttt{sympy-13031} & 10 & 2/10, first=6 \\
+Stage2-01 Django & \texttt{django-11278} & 10 & 5/10, first=4 \\
+Stage2-02 & SymPy + Django & 10 & 1/10, incomplete=4 \\
+Stage3 closure & SymPy only & 5 & 0/5, incomplete=4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Stage2-01 made T1-C observable, but all critic verdicts were
+\texttt{approve}. The per-instance Stage2-01 rows show modest SymPy recovery
+and a weaker reproduction of the Django positive signal. Stage2-02 indicates
+that critic behavior remained unstable after additional guards. The Stage3
+closure run remained dominated by exploration non-convergence.
+
+%=====================================================
+\section*{Acknowledgments}
+%=====================================================
+
+Experiments were conducted using the Kimi API (Moonshot AI) and the SWE-bench official evaluation harness. Docker infrastructure was used for isolated per-attempt evaluation.
+
+\begin{thebibliography}{99}
+\bibitem{jimenez2024swebench}
+Jimenez, C. E., Yang, J., Wettig, A., Yao, S., Pei, K., Press, O., \& Narasimhan, K. (2024).
+\newblock \textit{SWE-bench: Can language models resolve real-world GitHub issues?}
+\newblock In \textit{International Conference on Learning Representations (ICLR 2024)}.
+
+\bibitem{yang2024sweagent}
+Yang, J., Jimenez, C. E., Wettig, A., Lieret, K., Yao, S., Narasimhan, K. R., \& Press, O. (2024).
+\newblock \textit{SWE-agent: Agent-Computer Interfaces enable automated software engineering}.
+\newblock arXiv:2405.15793.
+
+\bibitem{xia2024agentless}
+Xia, C. S., Deng, Y., Dunn, S., \& Zhang, L. (2024).
+\newblock \textit{Agentless: Demystifying LLM-based software engineering agents}.
+\newblock arXiv:2407.01489.
+
+\bibitem{shinn2023reflexion}
+Shinn, N., Cassano, F., Berman, E., Gopinath, A., Narasimhan, K., \& Yao, S. (2023).
+\newblock \textit{Reflexion: Language agents with verbal reinforcement learning}.
+\newblock arXiv:2303.11366.
+
+\bibitem{madaan2023selfrefine}
+Madaan, A., Tandon, N., Gupta, P., Hallinan, S., Gao, L., Wiegreffe, S., Alon, U., Dziri, N., Prabhumoye, S., Yang, Y., Welleck, S., Majumder, B. P., Gupta, S., Yazdanbakhsh, A., \& Clark, P. (2023).
+\newblock \textit{Self-Refine: Iterative refinement with self-feedback}.
+\newblock In \textit{Advances in Neural Information Processing Systems 36}.
+
+\bibitem{zhou2023lats}
+Zhou, A., Yan, K., Shlapentokh-Rothman, M., Wang, H., \& Wang, Y.-X. (2023).
+\newblock \textit{Language Agent Tree Search unifies reasoning, acting, and planning in language models}.
+\newblock arXiv:2310.04406.
+
+\bibitem{han2024graphrag}
+Han, H., Wang, Y., Shomer, H., Guo, K., Ding, J., Lei, Y., Halappanavar, M., Rossi, R. A., Mukherjee, S., Tang, X., He, Q., Hua, Z., Long, B., Zhao, T., Shah, N., Javari, A., Xia, Y., \& Tang, J. (2024).
+\newblock \textit{Retrieval-augmented generation with graphs (GraphRAG)}.
+\newblock arXiv:2501.00309.
+
+\bibitem{arora2024masai}
+Arora, D., Naik, N., Aggarwal, P., Bhatt, S., Chandel, A., Dixit, A., Garg, A., Garg, N., Goyal, N., Jain, A., \& Singla, P. (2024).
+\newblock \textit{MASAI: Modular Architecture for Software-engineering AI Agents}.
+\newblock arXiv:2406.11638.
+
+\bibitem{zan2024marscode}
+Zan, D., Liu, Z., Wen, H., Li, H., Zhao, Q., Liu, S., \& Luo, J. (2024).
+\newblock \textit{MarsCode Agent: AI-native Automated Bug Fixing}.
+\newblock arXiv:2409.00899.
+
+\bibitem{bouzenia2024repairagent}
+Bouzenia, I., Devanbu, P., \& Pradel, M. (2024).
+\newblock \textit{RepairAgent: An Autonomous, LLM-Based Agent for Program Repair}.
+\newblock arXiv:2403.17134.
+
+\bibitem{chowdhury2024swebenchverified}
+Chowdhury, N., Aung, J., Shern, C. J., Jaffe, O., Sherburn, D., Starace, G., Mays, E., Dias, R., Aljubeh, M., Glaese, M., Jimenez, C. E., Yang, J., Ho, L., Patwardhan, T., Liu, K., \& Madry, A. (2024).
+\newblock \textit{Introducing SWE-bench Verified}.
+\newblock OpenAI.
+
+\bibitem{park2023generative}
+Park, J. S., O'Brien, J., Cai, C. J., Morris, M. R., Liang, P., \& Bernstein, M. S. (2023).
+\newblock \textit{Generative agents: Interactive simulacra of human behavior}.
+\newblock In \textit{ACM UIST 2023}.
+
+\bibitem{packer2023memgpt}
+Packer, C., Wooders, S., Lin, K., Fang, V., Patil, S. G., Stoica, I., \& Gonzalez, J. E. (2023).
+\newblock \textit{MemGPT: Towards LLMs as operating systems}.
+\newblock arXiv:2310.08560.
+
+\bibitem{zhao2024expel}
+Zhao, A., Huang, D., Xu, Q., Lin, M., Liu, Y.-J., \& Huang, G. (2024).
+\newblock \textit{ExpeL: LLM agents are experiential learners}.
+\newblock In \textit{AAAI 2024}.
+
+\bibitem{li2025swedebate}
+Li, H., Shi, Y., Lin, S., Gu, X., Lian, H., Wang, X., Jia, Y., Huang, T., \& Wang, Q. (2025).
+\newblock \textit{SWE-Debate: Competitive multi-agent debate for software issue resolution}.
+\newblock arXiv:2507.23348.
+
+\bibitem{gerevini2006pddl3}
+Gerevini, A., \& Long, D. (2006).
+\newblock \textit{Preferences and soft constraints in PDDL3}.
+\newblock In \textit{ICAPS Workshop on Planning with Preferences and Soft Constraints}, 46--53.
+\end{thebibliography}
+
+\end{document}

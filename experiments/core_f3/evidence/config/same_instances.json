@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-05-08T18:23:14+02:00",
+  "subset": "full",
+  "split": "test",
+  "selection_mode": "manual_f3_9instances_nomem_withmem_watchdog",
+  "count_selected": 9,
+  "repeats": 10,
+  "instance_ids": [
+    "django__django-12284",
+    "django__django-16139",
+    "django__django-12497",
+    "sympy__sympy-24066",
+    "sympy__sympy-13031",
+    "sympy__sympy-13551",
+    "astropy__astropy-12907",
+    "astropy__astropy-14995",
+    "astropy__astropy-13033"
+  ]
+}

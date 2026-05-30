@@ -1,0 +1,30 @@
+{
+  "experiment": "multiagent_auxiliary",
+  "interpretation": "Targeted mechanism study, not a benchmark-scale performance claim.",
+  "stage1_t1a_t1c": {
+    "instances": 4,
+    "attempts": 40,
+    "resolved_attempts": 17,
+    "control_resolved_at_10": 0.75,
+    "treatment_resolved_at_10": 1.0,
+    "t1a_events": 251,
+    "t1c_verdicts": 0
+  },
+  "stage2_observability": {
+    "attempts": 20,
+    "t1c_verdicts": 20,
+    "precheck_diffs": 28,
+    "verdict_distribution": {"approve": 20}
+  },
+  "stage2_critic_guard": {
+    "attempts": 10,
+    "resolved_attempts": 1,
+    "incomplete_attempts": 4
+  },
+  "stage3_closure": {
+    "attempts": 5,
+    "resolved_attempts": 0,
+    "incomplete_attempts": 4
+  }
+}
+

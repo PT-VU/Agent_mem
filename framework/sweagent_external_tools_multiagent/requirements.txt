@@ -1,0 +1,17 @@
+# Core dependencies
+networkx>=3.0
+numpy>=1.24.0
+pyyaml>=6.0
+
+# Required embedding backend
+sentence-transformers>=2.2.0
+
+# Optional dependencies
+# neo4j>=5.0.0  # For graph database storage
+# redis>=4.5.0  # For caching
+
+# Development dependencies (not required for runtime)
+# pytest>=7.0.0
+# black>=23.0.0
+# isort>=5.12.0
+# mypy>=1.0.0

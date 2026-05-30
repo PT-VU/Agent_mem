@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+*.env
+*.log
+*.traj
+hook_events.jsonl
+main_tmux.env
+latest_run.env
+resource_slots/
+t1b_interim_cache/
+

@@ -1,0 +1,17 @@
+{
+  "run_id": "phase7_same_nomem_sympy__sympy-13551_attempt_09",
+  "dataset": "SWE-bench/SWE-bench test",
+  "scope": "Phase7 same-problem no-mem sympy__sympy-13551 attempt 09",
+  "planned_instances": 1,
+  "submitted_instances": 1,
+  "completed_instances": 1,
+  "resolved_instances": 1,
+  "unresolved_instances": 0,
+  "error_instances": 0,
+  "incomplete_instances": 0,
+  "incomplete_ids": [],
+  "solved_rate_on_planned": 1.0,
+  "solved_rate_on_submitted": 1.0,
+  "report_json": "/home/pt/SWE-bench/PDDL_work_mem/06_artificial_intelligence/experiments/final_validation/phase9_v2/phase9_f3_9inst_both_watchdog_20260506_045411/same_problem/nomem/metrics/attempt_reports/sympy__sympy-13551.attempt_09.official_eval.json",
+  "generated_at": "2026-05-06T20:38:26"
+}

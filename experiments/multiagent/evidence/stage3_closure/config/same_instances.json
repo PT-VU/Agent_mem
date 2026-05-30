@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-05-19T00:00:00+02:00",
+  "subset": "full",
+  "split": "test",
+  "selection_mode": "manual_stage3_closure_sympy5",
+  "repeats": 5,
+  "group": "stage3_closure_sympy5",
+  "t1_flags": {"T1A": true, "T1B": false, "T1C": true},
+  "upgrade_flags": {
+    "SWE_AGENT_T1A_MAX_REFORMATS_PER_ATTEMPT": 3,
+    "SWE_AGENT_T1C_USE_PRECHECK_DIFF": true,
+    "SWE_AGENT_T1C_SPLIT_FALLBACK_APPROVE": true,
+    "SWE_AGENT_T1C_DETERMINISTIC_GUARD": true,
+    "SWE_AGENT_T1C_REVISE_DUPLICATE_PRECHECK": true,
+    "SWE_AGENT_T1C_UNAVAILABLE_POLICY": "revise_once",
+    "AGENT_MEM_L3_FORCE_SUBMIT": "enforce",
+    "AGENT_MEM_STEP_GUARDRAIL_NO_EDIT": 10,
+    "AGENT_MEM_STEP_STRONG_NO_PATCH": 18,
+    "AGENT_MEM_STEP_HARD_STOP_TOTAL": 35
+  },
+  "instance_ids": [
+    "sympy__sympy-13031"
+  ]
+}
+

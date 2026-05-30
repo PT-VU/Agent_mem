@@ -1,0 +1,15 @@
+{
+  "experiment": "core_f3",
+  "benchmark": "SWE-bench Full test",
+  "benchmark_total_instances": 2294,
+  "selected_instances": 9,
+  "attempts_per_condition_per_instance": 10,
+  "total_attempts": 180,
+  "aggregate": {
+    "nomem": {"resolved": 62, "total": 90, "rate": 0.6889},
+    "with_mem": {"resolved": 63, "total": 90, "rate": 0.7},
+    "difference_percentage_points": 1.1
+  },
+  "interpretation": "Controlled diagnostic study; post-hoc groups are exploratory."
+}
+

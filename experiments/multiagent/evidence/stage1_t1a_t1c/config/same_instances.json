@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-05-12T07:23:57+02:00",
+  "subset": "full",
+  "split": "test",
+  "selection_mode": "manual_multiagent_l3",
+  "repeats": 10,
+  "group": "t1a_t1c",
+  "t1_flags": {
+    "T1A": true,
+    "T1B": false,
+    "T1C": true
+  },
+  "instance_ids": [
+    "astropy__astropy-12057",
+    "sympy__sympy-13551",
+    "sympy__sympy-13031",
+    "django__django-11278"
+  ],
+  "instance_count": 4,
+  "note_14182_removed": "astropy__astropy-14182 removed; using phase9-v2 historical data as control"
+}

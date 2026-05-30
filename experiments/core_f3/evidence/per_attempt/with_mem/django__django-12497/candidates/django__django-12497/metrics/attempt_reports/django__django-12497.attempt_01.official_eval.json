@@ -1,0 +1,19 @@
+{
+  "schema_version": "local_eval_stub_v1",
+  "total_instances": 1,
+  "submitted_instances": 0,
+  "completed_instances": 0,
+  "resolved_instances": 0,
+  "unresolved_instances": 0,
+  "error_instances": 0,
+  "submitted_ids": [],
+  "completed_ids": [],
+  "resolved_ids": [],
+  "unresolved_ids": [],
+  "error_ids": [],
+  "empty_patch_ids": [],
+  "incomplete_ids": [
+    "django__django-12497"
+  ],
+  "local_reason": "missing_prediction"
+}

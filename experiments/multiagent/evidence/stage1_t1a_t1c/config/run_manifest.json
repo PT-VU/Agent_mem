@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-05-12T07:23:57+02:00",
+  "experiment_type": "multiagent_l3_controlled",
+  "level": "Level-3",
+  "group": "t1a_t1c",
+  "run_root": "/home/pt/SWE-bench/PDDL_work_mem/06_artificial_intelligence/experiments/final_validation/multiagent_l3/t1a_t1c/l3_t1a_t1c_kimi_20260512_072357",
+  "same_instances_json": "/home/pt/SWE-bench/PDDL_work_mem/06_artificial_intelligence/experiments/final_validation/multiagent_l3/t1a_t1c/l3_t1a_t1c_kimi_20260512_072357/same_instances.json",
+  "model_config": "/home/pt/SWE-bench/SWE-agent/config/kimi25_moonshot.yaml",
+  "repeats": 10,
+  "t1_flags": {"T1A": true, "T1B": false, "T1C": true},
+  "framework_path": "/home/pt/SWE-bench/PDDL_work_mem/ agent/sweagent_external_tools_multiagent",
+  "framework_symlink": "/home/pt/SWE-bench/PDDL_work_mem/sweagent_external_tools_multiagent"
+}

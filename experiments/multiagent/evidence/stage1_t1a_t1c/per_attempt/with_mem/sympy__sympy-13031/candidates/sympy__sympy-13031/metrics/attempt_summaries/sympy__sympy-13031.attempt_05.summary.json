@@ -1,0 +1,19 @@
+{
+  "run_id": "same_v21_sympy__sympy-13031_sympy__sympy-13031_attempt_05",
+  "dataset": "SWE-bench/SWE-bench test",
+  "scope": "Lite failed-case repeat10 with_mem attempt 05",
+  "planned_instances": 1,
+  "submitted_instances": 0,
+  "completed_instances": 0,
+  "resolved_instances": 0,
+  "unresolved_instances": 0,
+  "error_instances": 0,
+  "incomplete_instances": 1,
+  "incomplete_ids": [
+    "sympy__sympy-13031"
+  ],
+  "solved_rate_on_planned": 0.0,
+  "solved_rate_on_submitted": 0.0,
+  "report_json": "/home/pt/SWE-bench/PDDL_work_mem/06_artificial_intelligence/experiments/final_validation/multiagent_l3/t1a_t1c/l3_t1a_t1c_kimi_20260512_072357/same_problem/with_mem/sympy__sympy-13031/candidates/sympy__sympy-13031/metrics/attempt_reports/sympy__sympy-13031.attempt_05.official_eval.json",
+  "generated_at": "2026-05-17T05:37:24"
+}
