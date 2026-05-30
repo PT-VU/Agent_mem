@@ -59,7 +59,7 @@ def main() -> int:
     summary_json = Path(args.summary_json).resolve()
     feedback_json = Path(args.feedback_json).resolve() if args.feedback_json else None
 
-    common_dir = workspace_root / "PDDL_work_mem/06_artificial_intelligence/experiments/common"
+    common_dir = Path(__file__).resolve().parent / "common"
     rebuild_script = common_dir / "rebuild_eval_predictions.py"
     summarize_script = common_dir / "summarize_official_eval.py"
     stub_script = common_dir / "write_local_eval_stub.py"

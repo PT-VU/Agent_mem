@@ -29,7 +29,10 @@ the card lifecycle.
 
 ## Multi-Agent Extension
 
-The multi-agent copy extends v2 without replacing the SWE-agent executor:
+The multi-agent directory is an experiment-specific snapshot derived from v2,
+not a second independent framework. It deliberately retains the shared v2 core
+so that the historical auxiliary launchers remain directly reproducible. The
+variant extends v2 without replacing the SWE-agent executor:
 
 | Module | Purpose | Primary implementation |
 | --- | --- | --- |
@@ -41,4 +44,3 @@ The multi-agent study is auxiliary. T1-A was active in the main aligned run.
 T1-C initially produced no verdicts because ordinary submit actions lacked an
 inline diff. Later stages improved observability but did not establish reliable
 semantic correction.
-

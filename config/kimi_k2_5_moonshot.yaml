@@ -1,0 +1,54 @@
+# Kimi K2.5 through the Moonshot OpenAI-compatible API.
+# Keep API keys outside the repository. Export MOONSHOT_API_KEY or place it in
+# SWE-agent/.env before running scripts/run_reviewer_case.sh --execute.
+agent:
+  model:
+    name: openai/kimi-k2.5
+    api_base: https://api.moonshot.cn/v1
+    api_key: $MOONSHOT_API_KEY
+    per_instance_cost_limit: 0.0
+    total_cost_limit: 0.0
+    temperature: 1.0
+    top_p: 0.95
+    completion_kwargs:
+      timeout: 300
+  templates:
+    system_template: |-
+      You are a helpful assistant that can interact with a computer to solve tasks.
+    instance_template: |-
+      <uploaded_files>
+      {{working_dir}}
+      </uploaded_files>
+      I have uploaded a Python code repository in {{working_dir}}. Consider the following issue:
+
+      <pr_description>
+      {{problem_statement}}
+      </pr_description>
+
+      Make the minimal changes to non-test files needed to satisfy the issue.
+      Prefer a focused reproduction and validation path. Once a localized patch
+      candidate exists, validate it before broadening the search area. Submit a
+      minimal locally validated patch promptly.
+    next_step_template: |-
+      OBSERVATION:
+      {{observation}}
+    next_step_no_output_template: |-
+      Your command ran successfully and did not produce any output.
+  tools:
+    env_variables:
+      PAGER: cat
+      MANPAGER: cat
+      LESS: -R
+      PIP_PROGRESS_BAR: 'off'
+      TQDM_DISABLE: '1'
+      GIT_PAGER: cat
+    bundles:
+      - path: tools/registry
+      - path: tools/edit_anthropic
+      - path: tools/review_on_submit_m
+    registry_variables:
+      USE_FILEMAP: 'true'
+    enable_bash_tool: true
+    parse_function:
+      type: function_calling
+  history_processors: []
