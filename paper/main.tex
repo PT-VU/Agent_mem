@@ -44,13 +44,15 @@ The automated resolution of real-world software bugs has emerged as a challengin
 
 Despite these advances, many repair pipelines still treat each attempt as an episodic event with no persistent memory across runs. When an agent fails to resolve a bug and is re-invoked---whether by a user, a pipeline, or an automated retry mechanism---it often begins from scratch, with no knowledge of which repair strategies were already attempted and failed, which file locations were already verified, or which specific patch structures were empirically shown to be correct. This is not merely an efficiency problem; it is a reliability problem. Agents that repeat invalid actions, explore already-exhausted search directions, or reproduce known-bad patches waste time budgets and fail to leverage an informative signal: their own prior experience with the same bug.
 
-Reflection and memory mechanisms have been studied in agent contexts. Reflexion~\cite{shinn2023reflexion} introduces verbal reinforcement learning by appending textual failure summaries to subsequent attempts. However, such approaches store experience as unstructured natural language, making it difficult to enforce correctness, ensure evidence-backing, or distinguish between soft guidance and hard constraints. Graph-augmented retrieval methods~\cite{han2024graphrag} improve access to structured relational information but do not specifically address the cross-attempt code repair scenario where the most valuable information is \emph{what happened on prior attempts at the same bug}.
+Reflection and memory mechanisms have been studied in agent contexts. Reflexion~\cite{shinn2023reflexion} introduces verbal reinforcement learning by appending textual failure summaries to subsequent attempts. However, such approaches store experience as unstructured natural language, making it difficult to enforce correctness, ensure evidence-backing, or distinguish between soft guidance and hard constraints. Retrieval-augmented generation~\cite{lewis2020rag} improves access to external evidence, but does not specifically address the cross-attempt code repair scenario where the most valuable information is \emph{what happened on prior attempts at the same bug}.
 
 We introduce \textbf{Agent-mem}, a training-free cross-attempt experience memory framework designed for code repair agents operating on SWE-bench. Agent-mem addresses the knowledge persistence gap through three mechanisms. First, it represents experience as \emph{semantically typed memory cards} (BugInvariantCard, SuccessPathCard, BugAntiPatternCard) that distinguish between successful repair patterns and known failure modes, preserving the verbatim patch diff and code anchors needed for precise reuse. Second, it manages card quality through an \emph{evidence-backed governance lifecycle} in which candidate cards are promoted upon official evaluation success or suppressed upon failure, preventing low-confidence memories from corrupting future attempts. Third, it implements \emph{progressively stronger control signals}: cards are initially injected as soft guidance, but a pre-submission consistency gate can block known-bad patches before they are submitted, and a strategy scheduler decides per-attempt whether to attempt verbatim reuse of a verified fix or to explore around the known invariant.
 
-The central empirical contribution of this paper is a controlled repeated-attempt experiment (180 attempts across 9 instances) that reveals a \textbf{zone-dependent effectiveness pattern} for cross-attempt memory. The effectiveness of Agent-mem is not uniform across bug instances; it varies with the underlying solve rate of the agent without memory. In the intermediate difficulty group (20--70\% nomem solve rate), memory is beneficial in our data. In the ceiling group (100\% nomem solve rate), memory can be harmful. In the zero group, memory may either unlock a previously unreachable solution or fail completely. We frame this as an exploratory empirical pattern requiring independent validation, not as a universal theory.
+These design choices are motivated by three lines of related work. Reflection and experiential-learning agents suggest that prior failures can guide future attempts~\cite{shinn2023reflexion,zhao2024expel}; SWE-agent and Agentless show that code repair depends heavily on precise tool interfaces and localization anchors~\cite{yang2024sweagent,xia2024agentless}; and self-refinement or search-based scaffolds show that repeated feedback can improve coverage, while still needing stronger grounding in executable outcomes~\cite{madaan2023selfrefine,zhou2023lats}.
 
-\paragraph{Contributions.} This paper makes four contributions:
+Accordingly, this thesis asks whether structured cross-attempt memory can improve repeated LLM-based code repair attempts, and under what conditions it helps or hurts. Its central empirical contribution is a controlled repeated-attempt experiment (180 attempts across 9 instances) that reveals a \textbf{zone-dependent effectiveness pattern}. In the intermediate difficulty group (20--70\% nomem solve rate), memory is beneficial in our data. In the ceiling group (100\% nomem solve rate), memory can be harmful. In the zero group, memory may either unlock a previously unreachable solution or fail completely. We frame this as an exploratory empirical pattern requiring independent validation, not as a universal theory.
+
+\paragraph{Contributions.} This thesis makes four contributions:
 \begin{enumerate}
     \item \textbf{Agent-mem framework}: A working, non-invasive implementation of cross-attempt memory for SWE-agent, comprising structured card types, five functional modules, a hint injection mechanism, and a time-fairness mechanism (Watchdog).
     \item \textbf{Controlled repeated-attempt evaluation}: A time-fair SWE-bench Full evaluation with 180 attempts across 9 instances, comparing standard SWE-agent against a memory-augmented condition.
@@ -66,7 +68,7 @@ The central empirical contribution of this paper is a controlled repeated-attemp
 
 SWE-bench~\cite{jimenez2024swebench} established a rigorous benchmark for evaluating automated code repair on real GitHub issues, grounding evaluation in executable test correctness. SWE-agent~\cite{yang2024sweagent} introduced the Agent-Computer Interface (ACI) design principle---structured file editing tools, repository navigation, and command execution---and demonstrated that interface design substantially outweighs prompt-level adjustments. Agentless~\cite{xia2024agentless} proposed a two-phase pipeline of hierarchical localization followed by repair without persistent agent state, achieving competitive performance at significantly lower cost.
 
-Modular approaches have further improved performance by decomposing the task. MASAI~\cite{arora2024masai} partitions software engineering into sub-problems handled by specialized agents, avoiding long trajectories that contaminate context and degrade generation quality. MarsCode Agent~\cite{zan2024marscode} applies a staged pipeline for planning, reproduction, localization, patch generation, and validation.
+Modular approaches have further improved performance by decomposing the task. MASAI~\cite{arora2024masai} partitions software engineering into sub-problems handled by specialized agents, avoiding long trajectories that contaminate context and degrade generation quality.
 
 A key limitation shared by all these approaches is the absence of cross-attempt persistence: each run discards all intermediate findings, and successive attempts are independent episodes. Agent-mem is designed to fill this gap.
 
@@ -74,9 +76,9 @@ A key limitation shared by all these approaches is the absence of cross-attempt 
 
 Reflexion~\cite{shinn2023reflexion} introduced verbal reinforcement learning, in which agents append natural language failure summaries to their context before re-attempting a task. While effective, this approach stores experience as unstructured prose, making it difficult to distinguish verified evidence from narrative inference, or to apply the experience as a hard constraint.
 
-ExpeL~\cite{zhao2024expel} learns from a collection of agent trajectories by extracting natural language insights for cross-task transfer. MemGPT~\cite{packer2023memgpt} develops long-term memory management for LLM agents with hierarchical storage. Generative Agents~\cite{park2023generative} use a memory stream and reflection mechanism for long-horizon social simulation. These works establish that external memory can improve agent performance across tasks, but none target the specific challenge of cross-attempt learning on a single, fixed bug instance where the most informative signal is the verbatim patch and the precise code location, not a linguistic summary.
+ExpeL~\cite{zhao2024expel} learns from a collection of agent trajectories by extracting natural language insights for cross-task transfer. Generative Agents~\cite{park2023generative} use a memory stream and reflection mechanism for long-horizon social simulation. These works establish that external memory can improve agent performance across tasks, but none target the specific challenge of cross-attempt learning on a single, fixed bug instance where the most informative signal is the verbatim patch and the precise code location, not a linguistic summary.
 
-Graph-augmented retrieval~\cite{han2024graphrag} structures knowledge as a graph for improved retrieval, but focuses on general knowledge rather than attempt-specific experience. Our GraphStore builds on similar graph storage principles but is purpose-built for structured, evidence-backed repair experience.
+Retrieval-augmented generation~\cite{lewis2020rag} grounds generation in external memory, but focuses on retrieved knowledge rather than attempt-specific repair experience. Our GraphStore is purpose-built for structured, evidence-backed repair memories.
 
 \subsection{Self-Refinement and Search-Based Agent Scaffolding}
 
@@ -212,6 +214,8 @@ where $t_{\text{bridge},i}$ is the duration of the $i$-th memory server call, lo
 %=====================================================
 \section{Experiments and Results}
 %=====================================================
+
+This section measures Agent-mem from three perspectives: repair effectiveness, efficiency, and mechanism behavior. We report official SWE-bench resolution rates, per-instance and zone-level heterogeneity, input-token cost, submission outcomes under the Watchdog budget, and a targeted multi-agent auxiliary study. The goal is not to claim a population-level improvement over SWE-bench, but to test whether structured cross-attempt memory changes repeated-attempt behavior in diagnostically useful ways.
 
 \subsection{Benchmark and Instance Selection}
 
@@ -429,6 +433,10 @@ The groups in Table~\ref{tab:zone} are defined from the same nomem outcomes bein
 
 The strongest positive single case is \texttt{sympy-13031} (0/10$\to$6/10), which is consistent with failure-side cards discouraging repeated wrong directions. However, stochastic variation remains a plausible alternative explanation, and \texttt{astropy-13033} remains unresolved in both conditions. The strongest negative case is \texttt{sympy-13551} (10/10$\to$5/10, $+$138.3\% tokens), suggesting that promoted cards can anchor later attempts to an unhelpful path. Conditional activation and memory freshness are therefore important deployment directions.
 
+\subsection{Practical Impact}
+
+In practice, cross-attempt memory is most relevant for teams that run automated repair agents repeatedly: benchmark maintainers, CI repair services, developer-assistance tools, and organizations triaging large issue backlogs. Agent-mem is not meant to replace repository tests or human review. Its practical role is narrower: preserve evidence from previous attempts, reduce repeated exploration, expose known-bad patch shapes, and make retries more auditable. The main beneficiaries are engineers who need lower-cost retry pipelines and researchers who need reproducible traces of why an agent converged or failed. The main deployment caution is also clear from the results: memory should be activated conditionally, because easy instances can be harmed by stale or over-specific guidance.
+
 \subsection{Threats to Validity and Future Work}
 
 \textbf{Scale and selection.} The controlled study contains nine diagnostic instances with ten attempts per condition. The instances were selected to expose different difficulty regimes rather than sampled randomly, and the zone groups are defined post hoc. Independent random or stratified validation is required.
@@ -443,7 +451,7 @@ The strongest positive single case is \texttt{sympy-13031} (0/10$\to$6/10), whic
 \section{Conclusion}
 %=====================================================
 
-We presented Agent-mem, a training-free cross-attempt memory framework for LLM-based code repair, and evaluated it across 180 attempts on nine SWE-bench Full instances. Aggregate improvement is small (+1.1 pp), but the diagnostic results reveal heterogeneous behavior: positive signals on intermediate-difficulty instances, interference on several ceiling cases, and mixed outcomes on zero-resolution cases. Because the groups are post hoc and the sample is small, this is an exploratory pattern rather than a validated theory.
+We presented Agent-mem, a training-free cross-attempt memory framework for LLM-based code repair, and evaluated it across 180 attempts on nine SWE-bench Full instances. The thesis asked whether structured cross-attempt memory can improve repeated repair attempts, and under what conditions it helps or hurts. The answer is conditional: aggregate improvement is small (+1.1 pp), but the diagnostic results reveal heterogeneous behavior, with positive signals on intermediate-difficulty instances, interference on several ceiling cases, and mixed outcomes on zero-resolution cases. Because the groups are post hoc and the sample is small, this is an exploratory pattern rather than a validated theory.
 
 The practical implication is conditional deployment: memory should be activated when early evidence suggests that it will reduce search variance, and suppressed when the base agent is already reliable. The auxiliary study further shows that phase-aware hint shaping may improve repeated-attempt coverage, whereas verbal pre-submit critics require executable grounding and cannot solve exploration non-convergence. Agent-mem's hook integration, structured cards, governance lifecycle, and time-fair evaluation provide a reusable basis for studying these questions.
 
@@ -490,20 +498,15 @@ Zhou, A., Yan, K., Shlapentokh-Rothman, M., Wang, H., \& Wang, Y.-X. (2023).
 \newblock \textit{Language Agent Tree Search unifies reasoning, acting, and planning in language models}.
 \newblock arXiv:2310.04406.
 
-\bibitem{han2024graphrag}
-Han, H., Wang, Y., Shomer, H., Guo, K., Ding, J., Lei, Y., Halappanavar, M., Rossi, R. A., Mukherjee, S., Tang, X., He, Q., Hua, Z., Long, B., Zhao, T., Shah, N., Javari, A., Xia, Y., \& Tang, J. (2024).
-\newblock \textit{Retrieval-augmented generation with graphs (GraphRAG)}.
-\newblock arXiv:2501.00309.
+\bibitem{lewis2020rag}
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., K\"uttler, H., Lewis, M., Yih, W.-t., Rockt\"aschel, T., Riedel, S., \& Kiela, D. (2020).
+\newblock \textit{Retrieval-augmented generation for knowledge-intensive NLP tasks}.
+\newblock In \textit{Advances in Neural Information Processing Systems 33}.
 
 \bibitem{arora2024masai}
 Arora, D., Sonwane, A., Wadhwa, N., Mehrotra, A., Utpala, S., Bairi, R., Kanade, A., \& Natarajan, N. (2024).
 \newblock \textit{MASAI: Modular Architecture for Software-engineering AI Agents}.
 \newblock arXiv:2406.11638.
-
-\bibitem{zan2024marscode}
-Liu, Y., Gao, P., Wang, X., Liu, J., Shi, Y., Zhang, Z., \& Peng, C. (2024).
-\newblock \textit{MarsCode Agent: AI-native Automated Bug Fixing}.
-\newblock arXiv:2409.00899.
 
 \bibitem{bouzenia2024repairagent}
 Bouzenia, I., Devanbu, P., \& Pradel, M. (2024).
@@ -519,11 +522,6 @@ Chowdhury, N., Aung, J., Shern, C. J., Jaffe, O., Sherburn, D., Starace, G., May
 Park, J. S., O'Brien, J., Cai, C. J., Morris, M. R., Liang, P., \& Bernstein, M. S. (2023).
 \newblock \textit{Generative agents: Interactive simulacra of human behavior}.
 \newblock In \textit{ACM UIST 2023}.
-
-\bibitem{packer2023memgpt}
-Packer, C., Wooders, S., Lin, K., Fang, V., Patil, S. G., Stoica, I., \& Gonzalez, J. E. (2023).
-\newblock \textit{MemGPT: Towards LLMs as operating systems}.
-\newblock arXiv:2310.08560.
 
 \bibitem{zhao2024expel}
 Zhao, A., Huang, D., Xu, Q., Lin, M., Liu, Y.-J., \& Huang, G. (2024).
